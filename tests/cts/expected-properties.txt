@@ -1,0 +1,91 @@
+[run ] geometry/triangle
+[run ] geometry/triangle_quad
+[run ] geometry/triangle_cube
+[run ] geometry/triangle_colors
+[run ] geometry/triangle_normal_tangent
+[run ] geometry/triangle_random_attributes
+[run ] geometry/triangle_unused_vertices
+[skip] geometry/quad  missing: ANARI_KHR_GEOMETRY_QUAD
+[skip] geometry/quad_cube  missing: ANARI_KHR_GEOMETRY_QUAD
+[skip] geometry/quad_colors  missing: ANARI_KHR_GEOMETRY_QUAD
+[skip] geometry/quad_frame_color_types  missing: ANARI_KHR_GEOMETRY_QUAD
+[skip] geometry/quad_normal_tangent  missing: ANARI_KHR_GEOMETRY_QUAD
+[skip] geometry/quad_unused_vertices  missing: ANARI_KHR_GEOMETRY_QUAD
+[run ] geometry/sphere
+[run ] geometry/sphere_colors
+[run ] geometry/sphere_frame_color_types
+[run ] geometry/sphere_global_radii
+[run ] geometry/sphere_unused_vertices
+[skip] geometry/cone  missing: ANARI_KHR_GEOMETRY_CONE
+[skip] geometry/cone_colors  missing: ANARI_KHR_GEOMETRY_CONE
+[skip] geometry/cone_frame_color_types  missing: ANARI_KHR_GEOMETRY_CONE
+[skip] geometry/cone_global_caps  missing: ANARI_KHR_GEOMETRY_CONE
+[skip] geometry/cone_vertex_caps  missing: ANARI_KHR_GEOMETRY_CONE
+[skip] geometry/cone_unused_vertices  missing: ANARI_KHR_GEOMETRY_CONE
+[skip] geometry/cylinder  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cylinder_colors  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cylinder_frame_color_types  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cylinder_global_caps  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cylinder_global_radii  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cylinder_vertex_caps  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cylinder_unused_vertices  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[run ] geometry/sphere_interior
+[skip] geometry/cylinder_axis_view  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cylinder_interior  missing: ANARI_KHR_GEOMETRY_CYLINDER
+[skip] geometry/cone_axis_view  missing: ANARI_KHR_GEOMETRY_CONE
+[skip] geometry/cone_apex_view  missing: ANARI_KHR_GEOMETRY_CONE
+[run ] geometry/sphere_tangent
+[run ] geometry/curve
+[run ] geometry/curve_colors
+[run ] geometry/curve_frame_color_types
+[run ] geometry/curve_global_radii
+[run ] geometry/curve_unused_vertices
+[skip] geometry/isosurface  missing: ANARI_KHR_GEOMETRY_ISOSURFACE
+[run ] material/matte_alpha_mode
+[run ] material/matte_color
+[run ] material/matte_opacity
+[run ] material/pbr_alpha_mode
+[run ] material/pbr_base_color
+[run ] material/pbr_clearcoat
+[run ] material/pbr_emissive
+[run ] material/pbr_ior
+[run ] material/pbr_iridescence
+[run ] material/pbr_metallic_roughness
+[run ] material/pbr_opacity
+[run ] material/pbr_sheen
+[run ] material/pbr_specular
+[run ] material/pbr_thickness
+[run ] material/pbr_transmission
+[skip] sampler/image1D  missing: ANARI_KHR_SAMPLER_IMAGE1D
+[run ] sampler/image2D
+[skip] sampler/image3D  missing: ANARI_KHR_SAMPLER_IMAGE3D
+[skip] sampler/primitive  missing: ANARI_KHR_SAMPLER_PRIMITIVE
+[skip] sampler/transform  missing: ANARI_KHR_SAMPLER_TRANSFORM
+[run ] light/directional
+[run ] light/point
+[skip] light/spot  missing: ANARI_KHR_LIGHT_SPOT
+[run ] light/quad
+[skip] light/ring  missing: ANARI_KHR_LIGHT_RING
+[run ] light/hdri
+[run ] camera/camera_general
+[run ] camera/perspective
+[run ] camera/orthographic
+[skip] camera/omnidirectional  missing: ANARI_KHR_CAMERA_OMNIDIRECTIONAL
+[run ] frame/frame_color_channel
+[run ] frame/frame_depth_channel
+[skip] frame/frame_albedo_channel  missing: ANARI_KHR_FRAME_CHANNEL_ALBEDO
+[skip] frame/frame_normal_channel  missing: ANARI_KHR_FRAME_CHANNEL_NORMAL
+[skip] frame/frame_primitiveID_channel  missing: ANARI_KHR_FRAME_CHANNEL_PRIMITIVE_ID
+[skip] frame/frame_objectID_channel_surface  missing: ANARI_KHR_FRAME_CHANNEL_OBJECT_ID
+[skip] frame/frame_objectID_channel_group  missing: ANARI_KHR_FRAME_CHANNEL_OBJECT_ID
+[skip] frame/frame_objectID_channel_volume  missing: ANARI_KHR_FRAME_CHANNEL_OBJECT_ID
+[skip] frame/frame_instanceID_channel  missing: ANARI_KHR_FRAME_CHANNEL_INSTANCE_ID
+[skip] frame/frame_completion_callback  missing: ANARI_KHR_FRAME_COMPLETION_CALLBACK
+[skip] frame/progressive_rendering  missing: ANARI_KHR_FRAME_ACCUMULATION
+[run ] renderer/renderer_ambient
+[run ] renderer/renderer_background_color
+[skip] renderer/renderer_background_image  missing: ANARI_KHR_RENDERER_BACKGROUND_IMAGE
+[run ] instance/instance
+[run ] volume/volume
+
+48 runnable, 41 skipped on 'moonray'

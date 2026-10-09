@@ -1,0 +1,38 @@
+{
+  "$comment": "Windows dependency manifest for the MoonRay stack (Milestones 2-3). Installed by scripts/build-moonray-deps-windows.ps1 into external/vcpkg-installed. The builtin-baseline is the pinned external/vcpkg checkout (release tag 2026.07.29); update both together. Only Lua is version-pinned (to the upstream superbuild's 5.4 line; vcpkg defaults to 5.5). The image/volume stack deliberately uses the baseline's MODERN versions (OpenEXR 3.4, OpenImageIO 3.1, OpenVDB 12, Imath 3) rather than the superbuild's 2020-era pins: the old OpenImageIO 2.3 cannot build against Boost 1.91 (boost::filesystem::is_regular was removed) and its registry hash is stale — see docs/WINDOWS_PORT.md 'Milestone 3 blockers'. The consequence is that the moonray core's OIIO/OpenEXR/OpenVDB API usage is ported forward on Windows. OIDN is not in vcpkg and comes as a prebuilt release zip via the build script.",
+  "name": "openmoonray-anari-windows-deps",
+  "version-string": "0.1.0",
+  "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "dependencies": [
+    "blosc",
+    "boost-algorithm",
+    "boost-dynamic-bitset",
+    "boost-filesystem",
+    "boost-format",
+    "boost-lexical-cast",
+    "boost-program-options",
+    "boost-regex",
+    "boost-thread",
+    "boost-type-traits",
+    "cppunit",
+    {
+      "$comment": "ray-mask is NOT one of the embree port's default features, and MoonRay's whole visibility system is built on Embree ray masks: camera/shadow/diffuse/glossy visibility flags, and - the one that makes it visible - the separation of volume rays from surface rays. Without it every ray hits every geometry, a volume's proxy geometry is hit as a surface, the primary ray's tfar is clipped there, and the volume integration covers a sliver of the volume instead of all of it (docs/WINDOWS_PORT.md).",
+      "name": "embree",
+      "features": ["ray-mask"]
+    },
+    "jsoncpp",
+    "log4cplus",
+    { "name": "lua", "features": ["tools"] },
+    "opencolorio",
+    "openexr",
+    "openimageio",
+    "opensubdiv",
+    "openssl",
+    "openvdb",
+    "random123",
+    "tbb"
+  ],
+  "overrides": [
+    { "name": "lua", "version": "5.4.8" }
+  ]
+}

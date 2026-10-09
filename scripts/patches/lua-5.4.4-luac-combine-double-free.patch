@@ -1,0 +1,10 @@
+--- a/src/luac.c
++++ b/src/luac.c
+@@ -156,6 +156,7 @@
+    if (f->p[i]->sizeupvalues>0) f->p[i]->upvalues[0].instack=0;
+   }
+   luaM_freearray(L,f->lineinfo,f->sizelineinfo);
++  f->lineinfo=NULL;
+   f->sizelineinfo=0;
+   return f;
+  }

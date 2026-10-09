@@ -1,0 +1,7 @@
+add_executable(openmoonray_anari_diag main.cpp)
+
+target_link_libraries(openmoonray_anari_diag PRIVATE openmoonray_anari_version)
+openmoonray_anari_set_warnings(openmoonray_anari_diag)
+openmoonray_anari_enable_sanitizers(openmoonray_anari_diag)
+
+install(TARGETS openmoonray_anari_diag RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

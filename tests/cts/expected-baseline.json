@@ -1,0 +1,588 @@
+{
+  "note": "Recorded by tests/cts/README.md; regenerate with the commands there.",
+  "device": "moonray",
+  "referenceDevice": "helide",
+  "resolution": [
+    128,
+    128
+  ],
+  "totals": {
+    "passed": 5,
+    "failed": 101,
+    "skipped": 223,
+    "cases": 329
+  },
+  "cases": {
+    "camera/camera_general/0.20601-0-0.97855_none_none": {
+      "color": "pass"
+    },
+    "camera/camera_general/none_0--0.97855-0.20601_none": {
+      "color": "fail"
+    },
+    "camera/camera_general/none_none_0.25-0.3-0.75-0.8": {
+      "color": "fail"
+    },
+    "camera/camera_general/none_none_none": {
+      "color": "fail"
+    },
+    "camera/omnidirectional/equirectangular": {},
+    "camera/omnidirectional/none": {},
+    "camera/orthographic/1.77_none_0.01_100": {
+      "color": "fail"
+    },
+    "camera/orthographic/none_0.5_0.01_100": {
+      "color": "fail"
+    },
+    "camera/orthographic/none_none_0.01_1": {
+      "color": "fail"
+    },
+    "camera/orthographic/none_none_0.01_100": {
+      "color": "fail"
+    },
+    "camera/orthographic/none_none_1_100": {
+      "color": "fail"
+    },
+    "camera/perspective/0.6_none_0.01_100": {
+      "color": "fail"
+    },
+    "camera/perspective/none_1.77_0.01_100": {
+      "color": "fail"
+    },
+    "camera/perspective/none_none_0.01_1": {
+      "color": "fail"
+    },
+    "camera/perspective/none_none_0.01_100": {
+      "color": "fail"
+    },
+    "camera/perspective/none_none_1_100": {
+      "color": "fail"
+    },
+    "frame/frame_albedo_channel/FLOAT32_VEC3": {},
+    "frame/frame_albedo_channel/UFIXED8_RGB_SRGB": {},
+    "frame/frame_albedo_channel/UFIXED8_VEC3": {},
+    "frame/frame_color_channel/FLOAT32_VEC4": {
+      "color": "fail"
+    },
+    "frame/frame_color_channel/UFIXED8_RGBA_SRGB": {
+      "color": "fail"
+    },
+    "frame/frame_color_channel/UFIXED8_VEC4": {
+      "color": "fail"
+    },
+    "frame/frame_completion_callback/default": {},
+    "frame/frame_depth_channel/default": {
+      "depth": "fail"
+    },
+    "frame/frame_instanceID_channel/default": {},
+    "frame/frame_normal_channel/FIXED16_VEC3": {},
+    "frame/frame_normal_channel/FLOAT32_VEC3": {},
+    "frame/frame_objectID_channel_group/default": {},
+    "frame/frame_objectID_channel_surface/default": {},
+    "frame/frame_objectID_channel_volume/default": {},
+    "frame/frame_primitiveID_channel/default": {},
+    "frame/progressive_rendering/default": {},
+    "geometry/cone/indexed": {},
+    "geometry/cone/soup": {},
+    "geometry/cone_apex_view/default": {},
+    "geometry/cone_axis_view/both": {},
+    "geometry/cone_axis_view/first": {},
+    "geometry/cone_axis_view/none": {},
+    "geometry/cone_axis_view/second": {},
+    "geometry/cone_colors/primitive.color": {},
+    "geometry/cone_colors/vertex.color": {},
+    "geometry/cone_frame_color_types/FLOAT32_VEC4": {},
+    "geometry/cone_frame_color_types/UFIXED8_RGBA_SRGB": {},
+    "geometry/cone_frame_color_types/UFIXED8_VEC4": {},
+    "geometry/cone_global_caps/both": {},
+    "geometry/cone_global_caps/first": {},
+    "geometry/cone_global_caps/none": {},
+    "geometry/cone_global_caps/second": {},
+    "geometry/cone_unused_vertices/default": {},
+    "geometry/cone_vertex_caps/false": {},
+    "geometry/cone_vertex_caps/true": {},
+    "geometry/curve/indexed": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/curve/soup": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/curve_colors/primitive.color": {
+      "color": "fail"
+    },
+    "geometry/curve_colors/vertex.color": {
+      "color": "fail"
+    },
+    "geometry/curve_frame_color_types/FLOAT32_VEC4": {
+      "color": "fail"
+    },
+    "geometry/curve_frame_color_types/UFIXED8_RGBA_SRGB": {
+      "color": "fail"
+    },
+    "geometry/curve_frame_color_types/UFIXED8_VEC4": {
+      "color": "fail"
+    },
+    "geometry/curve_global_radii/default": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/curve_unused_vertices/default": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/cylinder/indexed": {},
+    "geometry/cylinder/soup": {},
+    "geometry/cylinder_axis_view/both": {},
+    "geometry/cylinder_axis_view/first": {},
+    "geometry/cylinder_axis_view/none": {},
+    "geometry/cylinder_axis_view/second": {},
+    "geometry/cylinder_colors/primitive.color": {},
+    "geometry/cylinder_colors/vertex.color": {},
+    "geometry/cylinder_frame_color_types/FLOAT32_VEC4": {},
+    "geometry/cylinder_frame_color_types/UFIXED8_RGBA_SRGB": {},
+    "geometry/cylinder_frame_color_types/UFIXED8_VEC4": {},
+    "geometry/cylinder_global_caps/both": {},
+    "geometry/cylinder_global_caps/first": {},
+    "geometry/cylinder_global_caps/none": {},
+    "geometry/cylinder_global_caps/second": {},
+    "geometry/cylinder_global_radii/default": {},
+    "geometry/cylinder_interior/both": {},
+    "geometry/cylinder_interior/first": {},
+    "geometry/cylinder_interior/none": {},
+    "geometry/cylinder_interior/second": {},
+    "geometry/cylinder_unused_vertices/default": {},
+    "geometry/cylinder_vertex_caps/false": {},
+    "geometry/cylinder_vertex_caps/true": {},
+    "geometry/isosurface/default": {},
+    "geometry/quad/indexed": {},
+    "geometry/quad/soup": {},
+    "geometry/quad_colors/primitive.color": {},
+    "geometry/quad_colors/vertex.color": {},
+    "geometry/quad_cube/indexed": {},
+    "geometry/quad_cube/soup": {},
+    "geometry/quad_frame_color_types/FLOAT32_VEC4": {},
+    "geometry/quad_frame_color_types/UFIXED8_RGBA_SRGB": {},
+    "geometry/quad_frame_color_types/UFIXED8_VEC4": {},
+    "geometry/quad_normal_tangent/set_unset": {},
+    "geometry/quad_normal_tangent/set_vec3": {},
+    "geometry/quad_normal_tangent/set_vec4": {},
+    "geometry/quad_normal_tangent/unset_unset": {},
+    "geometry/quad_unused_vertices/default": {},
+    "geometry/sphere/16_indexed": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/sphere/16_soup": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/sphere/1_indexed": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/sphere/1_soup": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/sphere_colors/primitive.color_indexed": {
+      "color": "fail"
+    },
+    "geometry/sphere_colors/primitive.color_soup": {
+      "color": "fail"
+    },
+    "geometry/sphere_colors/vertex.color_indexed": {
+      "color": "fail"
+    },
+    "geometry/sphere_colors/vertex.color_soup": {
+      "color": "fail"
+    },
+    "geometry/sphere_frame_color_types/FLOAT32_VEC4": {
+      "color": "fail"
+    },
+    "geometry/sphere_frame_color_types/UFIXED8_RGBA_SRGB": {
+      "color": "fail"
+    },
+    "geometry/sphere_frame_color_types/UFIXED8_VEC4": {
+      "color": "fail"
+    },
+    "geometry/sphere_global_radii/default": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/sphere_interior/default": {
+      "depth": "fail"
+    },
+    "geometry/sphere_tangent/default": {
+      "color": "fail",
+      "depth": "pass"
+    },
+    "geometry/sphere_unused_vertices/default": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle/indexed": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle/soup": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle_colors/primitive.color": {
+      "color": "fail"
+    },
+    "geometry/triangle_colors/vertex.color": {
+      "color": "fail"
+    },
+    "geometry/triangle_cube/indexed": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle_cube/soup": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle_normal_tangent/set_unset": {
+      "color": "fail"
+    },
+    "geometry/triangle_normal_tangent/set_vec3": {
+      "color": "fail"
+    },
+    "geometry/triangle_normal_tangent/set_vec4": {
+      "color": "fail"
+    },
+    "geometry/triangle_normal_tangent/unset_unset": {
+      "color": "fail"
+    },
+    "geometry/triangle_quad/indexed": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle_quad/soup": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle_random_attributes/default": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "geometry/triangle_unused_vertices/default": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "instance/instance/default": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "light/directional/0--0.242536--0.970143_0.5": {},
+    "light/directional/0--0.242536--0.970143_none": {},
+    "light/directional/0-0--0.970143_none": {},
+    "light/hdri/0-1-0_none_none": {},
+    "light/hdri/none_0--1-0_none": {},
+    "light/hdri/none_none_0.4": {},
+    "light/hdri/none_none_none": {},
+    "light/point/0.5-0.5-10_0.6_none": {},
+    "light/point/0.5-0.5-10_none_0.4": {},
+    "light/point/0.5-0.5-10_none_none": {},
+    "light/point/0.5-0.5-1_none_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_0.6_none_none_both_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_0.4_none_both_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_none_0.2_both_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_none_none_back_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_none_none_both_1d": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_none_none_both_2d": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_none_none_both_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_none_none_front_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_-0.1-1-0_none_none_none_none_none": {},
+    "light/quad/0-0-0.1_0-0.1--1_none_none_none_none_both_none": {},
+    "light/quad/0-0-0.1_none_-0.1-1-0_none_none_none_both_none": {},
+    "light/quad/none_0-0.1--1_-0.1-1-0_none_none_none_both_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_0.5_none_none_none_none_none_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_1.1_none_none_none_none_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_none_0.6_none_none_none_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_none_none_0.4_none_none_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_none_none_none_0.2_none_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_none_none_none_none_0.7071-0.7071-0_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_none_none_none_none_none_1d": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_none_none_none_none_none_2d": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_0.15_none_none_none_none_none_none_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_0.3_none_none_none_none_none_none_none_none": {},
+    "light/ring/0.2-0.2-0.1_0--0.20601--0.97855_none_0.15_none_none_none_none_none_none_none": {},
+    "light/ring/0.2-0.2-0.1_none_0.3_0.15_none_none_none_none_none_none_none": {},
+    "light/ring/none_0--0.20601--0.97855_0.3_0.15_none_none_none_none_none_none_none": {},
+    "light/spot/0.3-0.3-0.3_0--0.242536--0.970143_0.5_none_none_none": {},
+    "light/spot/0.5-0.5-0.5_0--0.242536--0.970143_0.5_1.1_none_none": {},
+    "light/spot/0.5-0.5-0.5_0--0.242536--0.970143_0.5_none_0.6_none": {},
+    "light/spot/0.5-0.5-0.5_0--0.242536--0.970143_0.5_none_none_0.4": {},
+    "light/spot/0.5-0.5-0.5_0--0.242536--0.970143_0.5_none_none_none": {},
+    "light/spot/0.5-0.5-0.5_0--0.242536--0.970143_none_none_none_none": {},
+    "light/spot/0.5-0.5-0.5_0-0--0.970143_0.5_none_none_none": {},
+    "material/matte_alpha_mode/blend_0.1": {
+      "color": "fail"
+    },
+    "material/matte_alpha_mode/blend_none": {
+      "color": "fail"
+    },
+    "material/matte_alpha_mode/mask_0.1": {
+      "color": "fail"
+    },
+    "material/matte_alpha_mode/mask_none": {
+      "color": "fail"
+    },
+    "material/matte_alpha_mode/none_0.1": {
+      "color": "fail"
+    },
+    "material/matte_alpha_mode/none_none": {
+      "color": "fail"
+    },
+    "material/matte_alpha_mode/opaque_0.1": {
+      "color": "fail"
+    },
+    "material/matte_alpha_mode/opaque_none": {
+      "color": "fail"
+    },
+    "material/matte_color/0.98-0.5-0.44": {
+      "color": "fail"
+    },
+    "material/matte_color/attribute0": {
+      "color": "fail"
+    },
+    "material/matte_color/none": {
+      "color": "fail"
+    },
+    "material/matte_color/ref_sampler_0": {
+      "color": "fail"
+    },
+    "material/matte_opacity/0.5": {
+      "color": "fail"
+    },
+    "material/matte_opacity/attribute2": {
+      "color": "fail"
+    },
+    "material/matte_opacity/none": {
+      "color": "fail"
+    },
+    "material/matte_opacity/ref_sampler_0": {
+      "color": "fail"
+    },
+    "material/pbr_alpha_mode/blend_0.1": {},
+    "material/pbr_alpha_mode/blend_none": {},
+    "material/pbr_alpha_mode/mask_0.1": {},
+    "material/pbr_alpha_mode/mask_none": {},
+    "material/pbr_alpha_mode/none_0.1": {},
+    "material/pbr_alpha_mode/none_none": {},
+    "material/pbr_alpha_mode/opaque_0.1": {},
+    "material/pbr_alpha_mode/opaque_none": {},
+    "material/pbr_base_color/0.98-0.5-0.44": {},
+    "material/pbr_base_color/attribute0": {},
+    "material/pbr_base_color/none": {},
+    "material/pbr_base_color/ref_sampler_0": {},
+    "material/pbr_clearcoat/0.5_0.5_none": {},
+    "material/pbr_clearcoat/0.5_0.5_ref_sampler_1": {},
+    "material/pbr_clearcoat/0.5_attribute0_none": {},
+    "material/pbr_clearcoat/0.5_none_none": {},
+    "material/pbr_clearcoat/0.5_ref_sampler_0_none": {},
+    "material/pbr_clearcoat/attribute0_0.5_none": {},
+    "material/pbr_clearcoat/none_0.5_none": {},
+    "material/pbr_clearcoat/ref_sampler_0_0.5_none": {},
+    "material/pbr_emissive/1-0-0": {},
+    "material/pbr_emissive/attribute0": {},
+    "material/pbr_emissive/none": {},
+    "material/pbr_emissive/ref_sampler_0": {},
+    "material/pbr_ior/2.42": {},
+    "material/pbr_ior/none": {},
+    "material/pbr_iridescence/0.5_2_0.5": {},
+    "material/pbr_iridescence/0.5_none_0.5": {},
+    "material/pbr_iridescence/0.5_none_attribute0": {},
+    "material/pbr_iridescence/0.5_none_none": {},
+    "material/pbr_iridescence/0.5_none_ref_sampler_0": {},
+    "material/pbr_iridescence/attribute0_none_0.5": {},
+    "material/pbr_iridescence/none_none_0.5": {},
+    "material/pbr_iridescence/ref_sampler_0_none_0.5": {},
+    "material/pbr_metallic_roughness/0.5_0.5_none": {},
+    "material/pbr_metallic_roughness/0.5_0.5_ref_sampler_1": {},
+    "material/pbr_metallic_roughness/0.5_attribute0_none": {},
+    "material/pbr_metallic_roughness/0.5_none_none": {},
+    "material/pbr_metallic_roughness/0.5_ref_sampler_0_none": {},
+    "material/pbr_metallic_roughness/attribute0_0.5_none": {},
+    "material/pbr_metallic_roughness/none_0.5_none": {},
+    "material/pbr_metallic_roughness/ref_sampler_0_0.5_none": {},
+    "material/pbr_opacity/0.5": {},
+    "material/pbr_opacity/attribute2": {},
+    "material/pbr_opacity/none": {},
+    "material/pbr_opacity/ref_sampler_0": {},
+    "material/pbr_sheen/0.98-0.5-0.44_0.5": {},
+    "material/pbr_sheen/0.98-0.5-0.44_attribute0": {},
+    "material/pbr_sheen/0.98-0.5-0.44_none": {},
+    "material/pbr_sheen/0.98-0.5-0.44_ref_sampler_1": {},
+    "material/pbr_sheen/attribute0_0.5": {},
+    "material/pbr_sheen/none_0.5": {},
+    "material/pbr_sheen/ref_sampler_0_0.5": {},
+    "material/pbr_specular/0.5_0.98-0.5-0.44": {},
+    "material/pbr_specular/0.5_attribute0": {},
+    "material/pbr_specular/0.5_none": {},
+    "material/pbr_specular/0.5_ref_sampler_0": {},
+    "material/pbr_specular/attribute0_0.98-0.5-0.44": {},
+    "material/pbr_specular/none_0.98-0.5-0.44": {},
+    "material/pbr_specular/ref_sampler_1_0.98-0.5-0.44": {},
+    "material/pbr_thickness/0.5_0.5_0.98-0.5-0.44": {},
+    "material/pbr_thickness/0.5_0.5_none": {},
+    "material/pbr_thickness/0.5_none_0.98-0.5-0.44": {},
+    "material/pbr_thickness/attribute0_0.5_0.98-0.5-0.44": {},
+    "material/pbr_thickness/none_0.5_0.98-0.5-0.44": {},
+    "material/pbr_thickness/ref_sampler_0_0.5_0.98-0.5-0.44": {},
+    "material/pbr_transmission/0.5": {},
+    "material/pbr_transmission/attribute0": {},
+    "material/pbr_transmission/none": {},
+    "material/pbr_transmission/ref_sampler_0": {},
+    "renderer/renderer_ambient/0-0-0_0.5": {
+      "color": "fail"
+    },
+    "renderer/renderer_ambient/0-0-1_0": {
+      "color": "fail"
+    },
+    "renderer/renderer_ambient/0-0-1_0.5": {
+      "color": "fail"
+    },
+    "renderer/renderer_ambient/0-0-1_4": {
+      "color": "fail"
+    },
+    "renderer/renderer_ambient/0.5-0.5-0.5_0.5": {
+      "color": "fail"
+    },
+    "renderer/renderer_ambient/1-1-1_0.5": {
+      "color": "fail"
+    },
+    "renderer/renderer_background_color/0-0-0-1": {
+      "color": "pass"
+    },
+    "renderer/renderer_background_color/0-0-1-0.5": {
+      "color": "pass"
+    },
+    "renderer/renderer_background_color/0-0-1-1": {
+      "color": "pass"
+    },
+    "renderer/renderer_background_color/0.5-0.5-0.5-1": {
+      "color": "pass"
+    },
+    "renderer/renderer_background_image/default": {},
+    "sampler/image1D/linear_none_none_none_none_none": {},
+    "sampler/image1D/nearest_none_none_none_none_none": {},
+    "sampler/image1D/none_clampToEdge_none_none_none_none": {},
+    "sampler/image1D/none_mirrorRepeat_none_none_none_none": {},
+    "sampler/image1D/none_none_-0.5--1-0-0-1--0.5-0-0-0-0--0.5-0-1-1-1-1_none_none_none": {},
+    "sampler/image1D/none_none_none_-1--1-0-0-1--1-0-0-0-0--1-0-1-1-1-1_none_none": {},
+    "sampler/image1D/none_none_none_none_0.7--0.4-0.6--0.2_none": {},
+    "sampler/image1D/none_none_none_none_none_0.7--0.4-0.6--0.2": {},
+    "sampler/image1D/none_none_none_none_none_none": {},
+    "sampler/image1D/none_repeat_none_none_none_none": {},
+    "sampler/image2D/linear_none_none_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/nearest_none_none_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_clampToEdge_none_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_mirrorRepeat_none_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_clampToEdge_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_mirrorRepeat_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_none_-0.5--1-0-0-1--0.5-0-0-0-0--0.5-0-1-1-1-1_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_none_none_-1--1-0-0-1--1-0-0-0-0--1-0-1-1-1-1_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_none_none_none_0.7--0.4-0.6--0.2_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_none_none_none_none_0.7--0.4-0.6--0.2": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_none_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_none_repeat_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image2D/none_repeat_none_none_none_none_none": {
+      "color": "fail"
+    },
+    "sampler/image3D/linear_none_none_none_none_none_none_none": {},
+    "sampler/image3D/nearest_none_none_none_none_none_none_none": {},
+    "sampler/image3D/none_clampToEdge_none_none_none_none_none_none": {},
+    "sampler/image3D/none_mirrorRepeat_none_none_none_none_none_none": {},
+    "sampler/image3D/none_none_clampToEdge_none_none_none_none_none": {},
+    "sampler/image3D/none_none_mirrorRepeat_none_none_none_none_none": {},
+    "sampler/image3D/none_none_none_clampToEdge_none_none_none_none": {},
+    "sampler/image3D/none_none_none_mirrorRepeat_none_none_none_none": {},
+    "sampler/image3D/none_none_none_none_-0.5--1-0-0-1--0.5-0-0-0-0--0.5-0-1-1-1-1_none_none_none": {},
+    "sampler/image3D/none_none_none_none_none_-1--1-0-0-1--1-0-0-0-0--1-0-1-1-1-1_none_none": {},
+    "sampler/image3D/none_none_none_none_none_none_0.7--0.4-0.6--0.2_none": {},
+    "sampler/image3D/none_none_none_none_none_none_none_0.7--0.4-0.6--0.2": {},
+    "sampler/image3D/none_none_none_none_none_none_none_none": {},
+    "sampler/image3D/none_none_none_repeat_none_none_none_none": {},
+    "sampler/image3D/none_none_repeat_none_none_none_none_none": {},
+    "sampler/image3D/none_repeat_none_none_none_none_none_none": {},
+    "sampler/primitive/1_1": {},
+    "sampler/primitive/1_2": {},
+    "sampler/primitive/1_3": {},
+    "sampler/primitive/1_4": {},
+    "sampler/primitive/none_1": {},
+    "sampler/primitive/none_2": {},
+    "sampler/primitive/none_3": {},
+    "sampler/primitive/none_4": {},
+    "sampler/transform/-1--1-0-0-1--1-0-0-0-0--1-0-1-1-1-1_0.7--0.4-0.6--0.2": {},
+    "sampler/transform/-1--1-0-0-1--1-0-0-0-0--1-0-1-1-1-1_none": {},
+    "sampler/transform/none_0.7--0.4-0.6--0.2": {},
+    "sampler/transform/none_none": {},
+    "volume/volume/linear_-1--1--1_none_none_array_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/nearest_-1--1--1_none_none_array_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_-1--1--1_0.01-0.02-0.5_none_array_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_-1--1--1_none_0.25-0.75_array_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_-1--1--1_none_none_array_array_0.1": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_-1--1--1_none_none_array_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_-1--1--1_none_none_array_scalar_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_-1--1--1_none_none_vec3_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_-1--1--1_none_none_vec4_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    },
+    "volume/volume/none_none_none_none_array_array_none": {
+      "color": "fail",
+      "depth": "fail"
+    }
+  }
+}

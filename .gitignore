@@ -1,0 +1,57 @@
+# Build directories
+build/
+out/
+install/
+# scripts/package-windows.ps1 stages the redistributable package here
+dist/
+
+# Pinned upstream sources live in external/ as SUBMODULES (see .gitmodules):
+#   external/openmoonray   - our namespace copy; carries the Windows port
+#   external/anari-sdk     - upstream
+#   external/pynari        - upstream
+#   external/vcpkg         - upstream, pinned to a release tag
+# They are tracked (as gitlinks), so external/ is NOT ignored wholesale.
+# What IS ignored is everything the build *produces* underneath it.
+# (A trailing "# ..." would be part of the pattern, so comments go on their
+#  own lines.)
+#
+# vcpkg install root (manifest mode)
+external/vcpkg-installed/
+# prebuilt downloads: ISPC, OIDN, winflexbison
+external/tools/
+# MoonRay install prefix
+external/installs/
+# ANARI-SDK install prefix
+external/install/
+
+# CMake user-local configuration (machine-specific, never committed)
+CMakeUserPresets.json
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# OS noise
+Thumbs.db
+.DS_Store
+
+# Claude Code local state
+.claude/
+
+# No hosted GitHub CI in this project (removed on request)
+.github/
+
+# Local render/test outputs
+Testing/
+*.exr.tmp
+*.png.tmp
+# RDL2 scene files written by the upstream scene_rdl2 test suites
+*.rdla
+*.rdlb
