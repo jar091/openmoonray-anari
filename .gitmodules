@@ -1,0 +1,42 @@
+; Pinned upstream sources. `git clone --recursive`, or
+; `git submodule update --init --recursive` in an existing clone.
+;
+; The submodule commits ARE the pins - they replace the hand-maintained lists
+; that used to live in scripts/fetch-dependencies.* and cmake/Dependencies.cmake
+; (see DEPENDENCIES.md).
+;
+; openmoonray is this project's own fork (github.com/jar091/openmoonray),
+; because the MoonRay libraries carry the Windows/MSVC port -
+; see docs/WINDOWS_PORT.md. Its own .gitmodules spells every url out in full
+; https, here and at every level: a relative url would resolve against
+; whatever `origin` happens to be, which silently sends the unforked modules
+; (rats, arras, hydra, ...) looking for repos in our GitHub namespace that do
+; not exist.
+;
+; anari-sdk points at github.com/jar091/ANARI-SDK, a fork of
+; KhronosGroup/ANARI-SDK; the pinned commit is the unmodified upstream
+; release. vcpkg is unmodified upstream and points at upstream.
+;
+; pynari points at github.com/jar091/pynari, a fork of ingowald/pynari, which
+; carries the one change this project needs as a commit (PYNARI.md explains
+; what it fixes and why it is upstreamable) - no build script patches a pinned
+; checkout. Same convention as openmoonray: in the checkout `origin` is the
+; fork and `upstream` is the GitHub original.
+
+[submodule "external/openmoonray"]
+	path = external/openmoonray
+	url = https://github.com/jar091/openmoonray.git
+	branch = windows-port
+
+[submodule "external/anari-sdk"]
+	path = external/anari-sdk
+	url = https://github.com/jar091/ANARI-SDK.git
+
+[submodule "external/pynari"]
+	path = external/pynari
+	url = https://github.com/jar091/pynari.git
+	branch = mjar/devel
+
+[submodule "external/vcpkg"]
+	path = external/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
