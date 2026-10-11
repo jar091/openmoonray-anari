@@ -35,7 +35,7 @@ ANARILibrary lib = anariLoadLibrary("moonray", statusCallback, userPtr);
 ANARIDevice device = anariNewDevice(lib, "default");
 ```
 
-usable from any ANARI C/C++ application and from [PyNARI](https://github.com/ingowald/pynari):
+usable from any ANARI C/C++ application and from [PyNARI](https://github.com/jar091/pynari):
 
 ```python
 import pynari as anari
