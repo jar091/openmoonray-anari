@@ -96,6 +96,7 @@ describe the last `anariRenderFrame`.
 | `moonray.bsdfSamples` | `ANARI_INT32` | MoonRay's `bsdf_samples`: N×N BSDF samples per lobe at every hit. Default 1 (MoonRay's own: 2) |
 | `moonray.maxMeshLights` | `ANARI_INT32` | the bound on the lights for emitting surfaces, see the device parameter of the same name, which counts when the renderer does not set this |
 | `moonray.maxMeshLightTriangles` | `ANARI_INT32` | how many triangles the meshes of those lights may have together, both sides and all instances counted. Default 500 000. MoonRay builds the sampling structure of a mesh light again for every edit of it, in about a second per 250 000 triangles; an emitter which does not fit emits as a surface |
+| `moonray.minMeshLightPowerShare` | `ANARI_FLOAT32` | an emitter with less than this share of the power (area times radiance) of all emitters with `emissionSampling` gets no light and emits as a surface. Default 0.02; 0 gives every emitter a light |
 | `maxBounce` | `ANARI_INT32` | `max_depth`: bounces of any kind after the camera hit. Default 5 |
 | `maxDiffuseBounce` | `ANARI_INT32` | `max_diffuse_depth`. Default 2. The counts are the same as Cycles': n allows n bounces after the camera hit (measured in an integrating sphere, `build/graph-scratch/moonray/test/bounce_test.cpp`) |
 | `maxGlossyBounce` | `ANARI_INT32` | `max_glossy_depth`. Default 2. MoonRay limits a lobe type for reflection and transmission together, so this also limits glossy transmission |
@@ -166,6 +167,11 @@ well:
   both sides and all instances counted, given to the emitters with the most
   power. All instances of a surface or none: they share one material. What
   does not fit emits as a surface, as before (`moonray.meshLightsOverLimit`).
+- **Small emitters get no light.** An emitter with less than
+  `moonray.minMeshLightPowerShare` (0.02) of the power of all emitters which
+  ask - those no light can serve included - stays a surface: there it adds as
+  little noise as it adds light, as a light it would cost what every light
+  costs.
 - **Updates.** The mesh of a light is named after the surface, not after its
   instances, and it is written again when the geometry, an instance or the set
   of instances changes; an application which makes all its instances anew for
@@ -193,7 +199,9 @@ What it costs and what is not covered:
 
 - Every light is a shadow ray per light sample at every hit. A scene with a
   few emitters which matter little next to its sun renders slower for a small
-  gain; `moonray.maxMeshLights` limits it, 0 switches it off.
+  gain; `moonray.maxMeshLights` limits it, 0 switches it off. The share of
+  the power only compares emitters with each other: it knows nothing of the
+  sun, the sky or the other lights of the scene.
 - A light gives the scene one more bounce of the emission than the surface did
   at the same diffuse depth, and the clamp of indirect samples now applies to
   it: the same scene is a few percent brighter at depth 8 and a quarter at
