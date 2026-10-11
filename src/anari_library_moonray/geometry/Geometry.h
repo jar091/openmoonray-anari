@@ -37,6 +37,21 @@ struct Geometry : public Object
   // and runs on the MoonRay backend thread.
   virtual void syncRdl2(scene_rdl2::rdl2::SceneObject &obj) const;
 
+  // The area of the surface in its own space, 0 for a geometry that cannot
+  // carry a mesh light (everything but the triangle geometry).
+  virtual float surfaceArea() const;
+
+  // The vertex positions moved by `distance` along the normals (the given
+  // ones, or else those of the faces around a vertex), three floats each in
+  // the order syncRdl2() writes them; a negative distance moves them to the
+  // back. False for a geometry that cannot carry a mesh light.
+  virtual bool displacedPositions(
+      float distance, std::vector<float> &positions) const;
+  // Half the diagonal of the bounds of the vertex positions, 0 without any.
+  virtual float boundingRadius() const;
+  // The number of triangles, 0 for a geometry that cannot carry a mesh light.
+  virtual size_t triangleCount() const;
+
   // Per-vertex data that is not part of the geometry's own RDL2 attributes -
   // ANARI's `vertex.color` and `vertex.attribute*` - reaches MoonRay as
   // *primitive attributes*, which are `UserData` scene objects listed in the
@@ -70,6 +85,14 @@ struct Geometry : public Object
   // the image1D sampler, which has to work on every geometry, not only on
   // meshes.
   static constexpr const char *attribute0Name = "anari_attribute0";
+
+  // The names of all four attribute slots as primitive attributes, for
+  // shading networks that name the geometry's data themselves (the `rdla`
+  // material): `anari_attribute0` .. `anari_attribute3`, each a vec3f holding
+  // the slot's first three components. MoonRay keys a primitive attribute on
+  // its name *and* type, so the vec2f `anari_attribute0` above and the vec3f
+  // one are two attributes that happen to share a name.
+  static const char *attributeName(int slot);
 
  protected:
   // Warns about every listed parameter the application set but this device

@@ -1,0 +1,63 @@
+{
+    "name": "AnariBumpNormalMap",
+    "type": "NormalMap",
+    "attributes": {
+        "attrInputHeight": {
+            "name": "input_height",
+            "label": "input height",
+            "type": "Float",
+            "default": "1.0f",
+            "flags": "FLAGS_BINDABLE",
+            "comment": "The height of the surface above the geometry: bind the map which computes it. The map is evaluated three times, at the shading point and at two points next to it, and the normal is tilted by the slope between them",
+            "group": "Bump"
+        },
+        "attrStrength": {
+            "name": "strength",
+            "type": "Float",
+            "default": "1.0f",
+            "flags": "FLAGS_BINDABLE",
+            "comment": "How much of the bumped normal is used: 0 leaves the normal as it is, 1 is the bumped normal. Negative values count as 0",
+            "group": "Bump"
+        },
+        "attrDistance": {
+            "name": "distance",
+            "type": "Float",
+            "default": "1.0f",
+            "flags": "FLAGS_BINDABLE",
+            "comment": "The length a height of 1 stands for, in the units of the space the bump is computed in (see object_space)",
+            "group": "Bump"
+        },
+        "attrInvert": {
+            "name": "invert",
+            "type": "Bool",
+            "default": "false",
+            "comment": "Heights go into the surface instead of out of it",
+            "group": "Bump"
+        },
+        "attrObjectSpace": {
+            "name": "object_space",
+            "label": "object space",
+            "type": "Bool",
+            "default": "true",
+            "comment": "Heights are lengths in the space of the object, so that the bumps scale with it; otherwise in world space",
+            "group": "Bump"
+        },
+        "attrFilterWidth": {
+            "name": "filter_width",
+            "label": "filter width",
+            "type": "Float",
+            "default": "0.1f",
+            "comment": "How far apart the three evaluations of the height are, in pixels",
+            "group": "Bump"
+        },
+        "attrInputNormal": {
+            "name": "input_normal",
+            "label": "input normal",
+            "type": "SceneObject*",
+            "flags": "FLAGS_NONE",
+            "interface": "INTERFACE_NORMALMAP",
+            "comment": "The normal to bump instead of the shading normal, e.g. another bump or a normal map",
+            "group": "Bump"
+        }
+    }
+}

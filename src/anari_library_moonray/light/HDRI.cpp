@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "HDRI.h"
-#include "texture/ScratchTexture.h"
 
 // scene_rdl2
 #include <scene_rdl2/scene/rdl2/SceneObject.h>
@@ -14,11 +13,6 @@
 namespace moonray_anari {
 
 HDRI::HDRI(MoonrayDeviceGlobalState *s) : Light(s), m_radiance(this) {}
-
-HDRI::~HDRI()
-{
-  texture::removeScratchTexture(m_texturePath);
-}
 
 void HDRI::commitParameters()
 {
@@ -60,36 +54,39 @@ void HDRI::finalize()
     return;
   }
 
-  m_valid = writeTextureFile();
+  m_valid = updateTexture();
 }
 
-bool HDRI::writeTextureFile()
+bool HDRI::updateTexture()
 {
-  std::string error;
-  // EnvLight's map is read as RGB (pbr::ImageDistribution converts whatever it
-  // opens to three channels), so the file is written with three.
-  const std::string path = texture::writeScratchTexture("hdri",
-      this,
-      m_radiance->size().x,
-      m_radiance->size().y,
-      m_radiance->elementType(),
-      m_radiance->data(),
-      /*channels=*/3,
-      // EnvLight opens the file itself rather than going through the texture
-      // system, so it needs no pyramid - and a pyramid that reaches 1x1 makes
-      // it log a warning for every map it loads.
-      /*mipmapped=*/false,
-      error);
+  texture::ImageSource source;
+  source.array = m_radiance.get();
+  source.version = uint64_t(m_radiance->lastDataModified());
+  source.width = m_radiance->size().x;
+  source.height = m_radiance->size().y;
+  source.type = m_radiance->elementType();
+  source.data = m_radiance->data();
 
-  if (path.empty()) {
+  texture::TextureLayout layout;
+  // EnvLight's map is read as RGB (pbr::ImageDistribution converts whatever it
+  // opens to three channels), so the texture gets three.
+  layout.channels = 3;
+  // EnvLight opens the image itself rather than going through the texture
+  // system, so it needs no pyramid - and a pyramid that reaches 1x1 makes it
+  // log a warning for every map it loads.
+  layout.mipmapped = false;
+
+  std::string error;
+  texture::TexturePtr texture =
+      texture::acquireTexture("hdri", source, layout, error);
+  if (!texture) {
     reportMessage(ANARI_SEVERITY_WARNING,
         "the hdri light could not prepare its environment map: %s",
         error.c_str());
     return false;
   }
 
-  texture::removeScratchTexture(m_texturePath);
-  m_texturePath = path;
+  m_texture = std::move(texture);
   return true;
 }
 
@@ -143,7 +140,7 @@ void HDRI::syncRdl2(
       Vec4d(0.0, 0.0, 0.0, 1.0));
 
   obj.set("node_xform", xform);
-  obj.set("texture", m_texturePath);
+  obj.set("texture", m_texture ? m_texture->name() : std::string());
   // An EnvLight's color is radiance directly (EnvLight::update()), and the
   // texture multiplies it, so ANARI's `scale` is the intensity and its `color`
   // the tint.

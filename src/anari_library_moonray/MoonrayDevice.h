@@ -88,6 +88,8 @@ struct MoonrayDevice : public helium::BaseDevice
   // the `moonray.executionMode` property hands out (the caller gets a pointer
   // to it, so it has to outlive the call).
   std::string m_executionMode{"auto"};
+  // `moonray.maxMeshLights`, for the scene when it is created.
+  int m_maxMeshLights{64};
   std::string m_executionModeProperty;
 };
 

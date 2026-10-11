@@ -24,6 +24,7 @@
       "khr_instance_transform",
       "khr_sampler_image1d",
       "khr_sampler_image2d",
+      "khr_sampler_transform",
       "khr_spatial_field_structured_regular",
       "khr_volume_transfer_function1d",
       "khr_renderer_ambient_light",
@@ -34,7 +35,17 @@
   "objects": [
     {
       "type": "ANARI_DEVICE",
-      "parameters": []
+      "parameters": [
+        {
+          "name": "moonray.maxMeshLights",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 64,
+          "description": "how many MeshLight objects are created at most for materials with emissionSampling, for a renderer which does not set its parameter of the same name"
+        }
+      ]
     },
     {
       "type": "ANARI_RENDERER",
@@ -66,6 +77,360 @@
           "tags": [],
           "default": 1,
           "description": "MoonRay bsdf_samples: per-axis count of BSDF samples per lobe at each hit (N*N samples); MoonRay's own default is 2"
+        },
+        {
+          "name": "moonray.maxMeshLights",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 64,
+          "description": "how many MeshLight objects are created at most for materials with emissionSampling; the emitters with the most power get them, the others emit as surfaces only; without it the device parameter of the same name counts"
+        },
+        {
+          "name": "moonray.maxMeshLightTriangles",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 500000,
+          "description": "how many triangles the meshes of the lights for materials with emissionSampling may have together, both sides and all instances counted; MoonRay rebuilds a mesh light for every edit of it, in about a second per 250000 triangles"
+        },
+        {
+          "name": "maxBounce",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 5,
+          "description": "maximum number of bounces of a path after the camera hit, of any kind (MoonRay max_depth)"
+        },
+        {
+          "name": "maxDiffuseBounce",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 2,
+          "description": "maximum number of diffuse bounces (MoonRay max_diffuse_depth)"
+        },
+        {
+          "name": "maxGlossyBounce",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 2,
+          "description": "maximum number of glossy bounces (MoonRay max_glossy_depth; with maxTransmissionBounce also max_mirror_depth)"
+        },
+        {
+          "name": "maxTransmissionBounce",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 3,
+          "description": "maximum number of transmission bounces through clear refractive surfaces (MoonRay max_mirror_depth = max of this and maxGlossyBounce)"
+        },
+        {
+          "name": "maxVolumeBounce",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 0,
+          "description": "maximum number of volume scattering bounces after the first scattering event (MoonRay max_volume_depth - 1)"
+        },
+        {
+          "name": "maxTransparencyBounce",
+          "types": [
+            "ANARI_INT32"
+          ],
+          "tags": [],
+          "default": 16,
+          "description": "maximum number of cutout (presence) surfaces a path passes through (MoonRay max_presence_depth)"
+        },
+        {
+          "name": "clampDirect",
+          "types": [
+            "ANARI_FLOAT32"
+          ],
+          "tags": [],
+          "default": 0.0,
+          "description": "limit for the contribution of a direct lighting sample at the camera hit, 0 for none; only effective when it is not above clampIndirect (MoonRay sample_clamping_depth 0)"
+        },
+        {
+          "name": "clampIndirect",
+          "types": [
+            "ANARI_FLOAT32"
+          ],
+          "tags": [],
+          "default": 10.0,
+          "description": "limit for the contribution of a lighting sample after the first bounce, 0 for none (MoonRay sample_clamping_value)"
+        }
+      ]
+    },
+    {
+      "type": "ANARI_MATERIAL",
+      "name": "physicallyBased",
+      "parameters": [
+        {
+          "name": "emissionSampling",
+          "types": [
+            "ANARI_STRING"
+          ],
+          "tags": [],
+          "default": "none",
+          "values": [
+            "none",
+            "front",
+            "back",
+            "both"
+          ],
+          "description": "sample the emission of the material with lights as well: a MeshLight for each of these sides of every instance of a triangle geometry that has the material, up to moonray.maxMeshLights; the surface itself then only emits for camera and mirror rays"
+        }
+      ]
+    },
+    {
+      "type": "ANARI_MATERIAL",
+      "name": "rdla",
+      "description": "a MoonRay shading network given as RDL2 ASCII (rdla) text",
+      "parameters": [
+        {
+          "name": "name",
+          "types": [
+            "ANARI_STRING"
+          ],
+          "tags": [],
+          "description": "optional object name"
+        },
+        {
+          "name": "source",
+          "types": [
+            "ANARI_STRING"
+          ],
+          "tags": [
+            "required"
+          ],
+          "description": "rdla (Lua) fragment that creates one Material and the maps it uses; a string attribute whose value equals the name of an image2D sampler parameter of this material refers to that sampler's image"
+        },
+        {
+          "name": "materialName",
+          "types": [
+            "ANARI_STRING"
+          ],
+          "tags": [
+            "required"
+          ],
+          "description": "name of the root Material object created by the fragment"
+        },
+        {
+          "name": "emissionSampling",
+          "types": [
+            "ANARI_STRING"
+          ],
+          "tags": [],
+          "default": "none",
+          "values": [
+            "none",
+            "front",
+            "back",
+            "both"
+          ],
+          "description": "sample the emission of the material with lights as well: a MeshLight for each of these sides of every instance of a triangle geometry that has the material, up to moonray.maxMeshLights; the surface itself then only emits for camera and mirror rays"
+        },
+        {
+          "name": "emissionColor",
+          "types": [
+            "ANARI_FLOAT32_VEC3"
+          ],
+          "tags": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "description": "with emissionSampling: the radiance the lights emit, multiplied with emissionMap when that is set"
+        },
+        {
+          "name": "emissionMap",
+          "types": [
+            "ANARI_STRING"
+          ],
+          "tags": [],
+          "description": "with emissionSampling: name of a Map object of the fragment the radiance of the lights is multiplied with"
+        },
+        {
+          "name": "sampledMaterialName",
+          "types": [
+            "ANARI_STRING"
+          ],
+          "tags": [],
+          "description": "with emissionSampling: name of the root Material of the fragment which the surface is shaded with while lights sample its emission; it has to emit for camera and mirror rays only"
+        }
+      ]
+    },
+    {
+      "type": "ANARI_INSTANCE",
+      "name": "transform",
+      "parameters": [
+        {
+          "name": "visibility.camera",
+          "types": [
+            "ANARI_BOOL"
+          ],
+          "tags": [],
+          "default": [
+            true
+          ],
+          "description": "the instance is visible to camera (primary) rays"
+        },
+        {
+          "name": "visibility.diffuse",
+          "types": [
+            "ANARI_BOOL"
+          ],
+          "tags": [],
+          "default": [
+            true
+          ],
+          "description": "the instance is visible to diffuse reflection rays"
+        },
+        {
+          "name": "visibility.glossy",
+          "types": [
+            "ANARI_BOOL"
+          ],
+          "tags": [],
+          "default": [
+            true
+          ],
+          "description": "the instance is visible to glossy/specular reflection rays"
+        },
+        {
+          "name": "visibility.transmission",
+          "types": [
+            "ANARI_BOOL"
+          ],
+          "tags": [],
+          "default": [
+            true
+          ],
+          "description": "the instance is visible to transmission (refraction) rays"
+        },
+        {
+          "name": "visibility.volumeScatter",
+          "types": [
+            "ANARI_BOOL"
+          ],
+          "tags": [],
+          "default": [
+            true
+          ],
+          "description": "the instance is visible to volume scattering rays"
+        },
+        {
+          "name": "visibility.shadow",
+          "types": [
+            "ANARI_BOOL"
+          ],
+          "tags": [],
+          "default": [
+            true
+          ],
+          "description": "the instance casts shadows (is visible to shadow rays)"
+        },
+        {
+          "name": "objectRandom",
+          "types": [
+            "ANARI_FLOAT32"
+          ],
+          "tags": [],
+          "description": "a random number of the object, exported as the per-instance primitive attribute anari_object_random (float) for shading networks to read; the instance's color and id are exported as anari_object_color (rgb) and anari_object_index (float)"
+        }
+      ]
+    },
+    {
+      "type": "ANARI_LIGHT",
+      "name": "point",
+      "parameters": [
+        {
+          "name": "falloff.distance",
+          "types": [
+            "ANARI_ARRAY1D"
+          ],
+          "elementType": [
+            "ANARI_FLOAT32"
+          ],
+          "tags": [],
+          "description": "distances from the point of the light which emits, increasing: the emission is multiplied with falloff.color at these distances, linear in between and constant before the first and after the last (a MoonRay ColorRampLightFilter)"
+        },
+        {
+          "name": "falloff.color",
+          "types": [
+            "ANARI_ARRAY1D"
+          ],
+          "elementType": [
+            "ANARI_FLOAT32_VEC3"
+          ],
+          "tags": [],
+          "description": "what the emission of the light is multiplied with at the distances of falloff.distance"
+        }
+      ]
+    },
+    {
+      "type": "ANARI_LIGHT",
+      "name": "spot",
+      "parameters": [
+        {
+          "name": "falloff.distance",
+          "types": [
+            "ANARI_ARRAY1D"
+          ],
+          "elementType": [
+            "ANARI_FLOAT32"
+          ],
+          "tags": [],
+          "description": "distances from the point of the light which emits, increasing: the emission is multiplied with falloff.color at these distances, linear in between and constant before the first and after the last (a MoonRay ColorRampLightFilter)"
+        },
+        {
+          "name": "falloff.color",
+          "types": [
+            "ANARI_ARRAY1D"
+          ],
+          "elementType": [
+            "ANARI_FLOAT32_VEC3"
+          ],
+          "tags": [],
+          "description": "what the emission of the light is multiplied with at the distances of falloff.distance"
+        }
+      ]
+    },
+    {
+      "type": "ANARI_LIGHT",
+      "name": "quad",
+      "parameters": [
+        {
+          "name": "falloff.distance",
+          "types": [
+            "ANARI_ARRAY1D"
+          ],
+          "elementType": [
+            "ANARI_FLOAT32"
+          ],
+          "tags": [],
+          "description": "distances from the point of the light which emits, increasing: the emission is multiplied with falloff.color at these distances, linear in between and constant before the first and after the last (a MoonRay ColorRampLightFilter)"
+        },
+        {
+          "name": "falloff.color",
+          "types": [
+            "ANARI_ARRAY1D"
+          ],
+          "elementType": [
+            "ANARI_FLOAT32_VEC3"
+          ],
+          "tags": [],
+          "description": "what the emission of the light is multiplied with at the distances of falloff.distance"
         }
       ]
     }

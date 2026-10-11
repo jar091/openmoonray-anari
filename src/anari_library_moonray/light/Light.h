@@ -5,6 +5,8 @@
 
 #include "Object.h"
 
+#include <vector>
+
 namespace scene_rdl2 {
 namespace rdl2 {
 class SceneObject;
@@ -36,8 +38,18 @@ struct Light : public Object
   virtual void syncRdl2(
       scene_rdl2::rdl2::SceneObject &obj, const mat4 &instanceXfm) const;
 
+  // `falloff.distance` and `falloff.color`: what the emission is multiplied
+  // with, over the distance from the point of the light which emits to the
+  // point which is lit. Linear between the distances, constant before the
+  // first and after the last. Empty without one: the light then falls off
+  // with the square of the distance only, as every light does.
+  const std::vector<float> &falloffDistances() const;
+  const std::vector<float3> &falloffColors() const;
+
  protected:
   float3 m_color{1.f, 1.f, 1.f};
+  std::vector<float> m_falloffDistances;
+  std::vector<float3> m_falloffColors;
 };
 
 } // namespace moonray_anari

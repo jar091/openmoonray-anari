@@ -3,8 +3,9 @@
 
 #include "Image1D.h"
 #include "geometry/Geometry.h" // Geometry::attribute0Name
-#include "texture/ScratchTexture.h"
 
+// anari
+#include <anari/frontend/type_utility.h>
 // scene_rdl2
 #include <scene_rdl2/scene/rdl2/SceneObject.h>
 #include <scene_rdl2/scene/rdl2/Types.h>
@@ -12,11 +13,6 @@
 namespace moonray_anari {
 
 Image1D::Image1D(MoonrayDeviceGlobalState *s) : Sampler(s), m_image(this) {}
-
-Image1D::~Image1D()
-{
-  texture::removeScratchTexture(m_texturePath);
-}
 
 void Image1D::commitParameters()
 {
@@ -34,16 +30,18 @@ void Image1D::commitParameters()
   m_uScale = t[0][0];
   m_uOffset = t[3][0] + inOffset.x;
 
-  if (hasParam("outTransform") || hasParam("outOffset")) {
-    reportMessage(ANARI_SEVERITY_WARNING,
-        "'outTransform'/'outOffset' are not supported by the image1D sampler "
-        "yet - the image values are used unchanged");
-  }
+  m_output.set(getParam<mat4>("outTransform", mat4(linalg::identity)),
+      getParam<float4>("outOffset", float4(0.f)));
 }
 
 void Image1D::finalize()
 {
   m_valid = false;
+
+  for (int i = 0; i < 3; ++i) {
+    m_previousTextures[i] = std::move(m_textures[i]);
+    m_textures[i] = nullptr;
+  }
 
   if (!m_image) {
     reportMessage(ANARI_SEVERITY_WARNING,
@@ -51,10 +49,24 @@ void Image1D::finalize()
     return;
   }
 
-  if (m_inAttribute != "attribute0") {
+  if (!texture::isImageType(m_image->elementType())) {
     reportMessage(ANARI_SEVERITY_WARNING,
-        "the image1D sampler only reads 'attribute0' (the geometry's "
-        "vertex.attribute0); '%s' is not available",
+        "the image1D sampler cannot use an image of type %s as a texture",
+        anari::toString(m_image->elementType()));
+    return;
+  }
+
+  // attribute0 is exported by every geometry that has it, as a vec2f; the
+  // other slots are the vec3f attributes of the triangle geometry.
+  if (m_inAttribute == "attribute0") {
+    m_inputAttribute = Geometry::attribute0Name;
+    m_inputAttributeType = 1;
+  } else if (m_inAttribute == "color"
+      || !primitiveAttribute(
+          m_inAttribute, m_inputAttribute, m_inputAttributeType)) {
+    reportMessage(ANARI_SEVERITY_WARNING,
+        "the image1D sampler reads 'attribute0' .. 'attribute3'; '%s' is not "
+        "available",
         m_inAttribute.c_str());
     return;
   }
@@ -74,41 +86,7 @@ void Image1D::finalize()
     m_wrapMode = "clampToEdge";
   }
 
-  m_valid = writeTextureFile();
-}
-
-bool Image1D::writeTextureFile()
-{
-  // filter = "nearest" is emulated as for image2D: every texel becomes a run
-  // of identical pixels, so the texture system's filtering only blurs the
-  // outermost pixel of each run.
-  const uint32_t replicate = m_filter == "nearest"
-      ? texture::nearestReplication(m_image->size())
-      : 1u;
-
-  std::string error;
-  const std::string path = texture::writeScratchTexture("image1d",
-      this,
-      m_image->size(),
-      1,
-      m_image->elementType(),
-      m_image->data(),
-      /*channels=*/4,
-      /*mipmapped=*/true,
-      error,
-      replicate,
-      1);
-
-  if (path.empty()) {
-    reportMessage(ANARI_SEVERITY_WARNING,
-        "the image1D sampler could not prepare its texture: %s",
-        error.c_str());
-    return false;
-  }
-
-  texture::removeScratchTexture(m_texturePath);
-  m_texturePath = path;
-  return true;
+  m_valid = true;
 }
 
 bool Image1D::isValid() const
@@ -121,15 +99,44 @@ const char *Image1D::rdl2ClassName() const
   return "ImageMap";
 }
 
-void Image1D::syncRdl2(scene_rdl2::rdl2::SceneObject &obj)
+void Image1D::syncRdl2(scene_rdl2::rdl2::SceneObject &obj, SamplerUsage usage)
 {
-  obj.set("texture", m_texturePath);
+  texture::ImageSource source;
+  source.array = m_image.get();
+  source.version = uint64_t(m_image->lastDataModified());
+  source.width = m_image->size();
+  source.height = 1;
+  source.type = m_image->elementType();
+  source.data = m_image->data();
+
+  // filter = "nearest" is emulated as for image2D: every texel becomes a run
+  // of identical pixels, so the texture system's filtering only blurs the
+  // outermost pixel of each run.
+  texture::TextureLayout layout;
+  layout.replicateX = m_filter == "nearest"
+      ? texture::nearestReplication(m_image->size())
+      : 1u;
+  layout.replicateY = 1;
+
+  std::string error;
+  texture::TexturePtr texture = writeImageMapOutput(obj,
+      "image1d",
+      source,
+      layout,
+      planImageMapOutput(m_output, usage),
+      error);
+  if (!texture) {
+    reportMessage(ANARI_SEVERITY_WARNING,
+        "the image1D sampler could not prepare its texture: %s",
+        error.c_str());
+  }
+  m_textures[int(usage)] = std::move(texture);
+  m_previousTextures[int(usage)] = nullptr;
+
   // 2 == "input texture coordinates": st comes from the AttributeMap bound
   // to input_texture_coordinates (inputPrimitiveAttribute()). Its t is
   // irrelevant - the texture is a single row.
   obj.set("texture_coordinates", 2);
-  // The scratch file is linear float, so no decoding on top of it.
-  obj.set("gamma", 0);
   obj.set("wrap_around", m_wrapMode == "repeat");
   obj.set("scale", scene_rdl2::rdl2::Vec2f(m_uScale, 1.f));
   obj.set("offset", scene_rdl2::rdl2::Vec2f(m_uOffset, 0.f));
@@ -138,7 +145,12 @@ void Image1D::syncRdl2(scene_rdl2::rdl2::SceneObject &obj)
 
 const char *Image1D::inputPrimitiveAttribute() const
 {
-  return Geometry::attribute0Name;
+  return m_inputAttribute;
+}
+
+int Image1D::inputPrimitiveAttributeType() const
+{
+  return m_inputAttributeType;
 }
 
 } // namespace moonray_anari

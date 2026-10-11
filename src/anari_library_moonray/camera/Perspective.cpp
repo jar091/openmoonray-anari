@@ -64,14 +64,27 @@ void Perspective::syncRdl2(
   // focal length; the second then fixes par so the vertical angle stays fovy
   // even when the frame's aspect differs from the camera's (par == 1 in the
   // usual case where they agree).
+  //
+  // `imageRegion` selects a part of that image plane (Camera::film()). The
+  // plane is measured here at the distance where the *region* is as wide as
+  // the film back, so the film width stays what it is and the focal length
+  // carries the zoom: a narrower region is a longer lens, and the film
+  // offsets move it off the axis.
   const float aspect = m_aspect.value_or(imageAspect);
   const float tanHalfFovy = std::tan(0.5f * m_fovy);
-  const float focal = (0.5f * kFilmWidthMM) / (aspect * tanHalfFovy);
-  const float par = imageAspect > 0.f ? aspect / imageAspect : 1.f;
+  // The plane at distance 1 is 2 aspect tanHalfFovy wide and 2 tanHalfFovy
+  // high; film() returns the window in those units.
+  const Film unit =
+      film(2.f * aspect * tanHalfFovy, 2.f * tanHalfFovy, imageAspect);
+  const float focal = kFilmWidthMM / unit.width;
 
   obj.set("focal", focal);
   obj.set("film_width_aperture", kFilmWidthMM);
-  obj.set("pixel_aspect_ratio", par);
+  obj.set("pixel_aspect_ratio", unit.pixelAspectRatio);
+  // The offsets are on the film, i.e. scaled like everything else by the
+  // focal length.
+  obj.set("horizontal_film_offset", unit.offsetX * focal);
+  obj.set("vertical_film_offset", unit.offsetY * focal);
   obj.set("near", m_near);
   obj.set("far", m_far);
 
@@ -100,11 +113,15 @@ void Perspective::syncRdl2(
   // near/far, and both are ANARI parameters with the same meaning.
 }
 
-float2 Perspective::imagePlaneHalfExtent(float imageAspect) const
+float4 Perspective::imagePlaneWindow(float imageAspect) const
 {
   const float aspect = m_aspect.value_or(imageAspect);
   const float tanHalfFovy = std::tan(0.5f * m_fovy);
-  return float2(aspect * tanHalfFovy, tanHalfFovy);
+  const float halfWidth = aspect * tanHalfFovy;
+  return float4(halfWidth * (2.f * m_imageRegion[0] - 1.f),
+      tanHalfFovy * (2.f * m_imageRegion[1] - 1.f),
+      halfWidth * (2.f * m_imageRegion[2] - 1.f),
+      tanHalfFovy * (2.f * m_imageRegion[3] - 1.f));
 }
 
 } // namespace moonray_anari

@@ -15,7 +15,11 @@ Triangle::Triangle(MoonrayDeviceGlobalState *s)
       m_index(this),
       m_vertexNormal(this),
       m_vertexColor(this),
-      m_vertexAttribute0(this)
+      m_vertexTangent(this),
+      m_vertexAttribute0(this),
+      m_vertexAttribute1(this),
+      m_vertexAttribute2(this),
+      m_vertexAttribute3(this)
 {}
 
 void Triangle::commitParameters()
@@ -24,13 +28,13 @@ void Triangle::commitParameters()
   m_index = getParamObject<Array1D>("primitive.index");
   m_vertexNormal = getParamObject<Array1D>("vertex.normal");
   m_vertexColor = getParamObject<Array1D>("vertex.color");
+  m_vertexTangent = getParamObject<Array1D>("vertex.tangent");
   m_vertexAttribute0 = getParamObject<Array1D>("vertex.attribute0");
+  m_vertexAttribute1 = getParamObject<Array1D>("vertex.attribute1");
+  m_vertexAttribute2 = getParamObject<Array1D>("vertex.attribute2");
+  m_vertexAttribute3 = getParamObject<Array1D>("vertex.attribute3");
 
-  reportUnsupportedParameters({"vertex.attribute1",
-      "vertex.attribute2",
-      "vertex.attribute3",
-      "vertex.tangent",
-      "primitive.color",
+  reportUnsupportedParameters({"primitive.color",
       "primitive.attribute0",
       "primitive.attribute1",
       "primitive.attribute2",
@@ -109,21 +113,47 @@ void Triangle::finalize()
     }
   }
 
-  if (m_vertexAttribute0) {
-    const ANARIDataType t = m_vertexAttribute0->elementType();
+  if (m_vertexTangent) {
+    const ANARIDataType t = m_vertexTangent->elementType();
+    if (t != ANARI_FLOAT32_VEC3 && t != ANARI_FLOAT32_VEC4) {
+      reportMessage(ANARI_SEVERITY_WARNING,
+          "'vertex.tangent' on triangle geometry must be a float3 or float4 "
+          "array - ignoring it");
+      m_vertexTangent = nullptr;
+    } else if (m_vertexTangent->size() != numVertices) {
+      reportMessage(ANARI_SEVERITY_WARNING,
+          "'vertex.tangent' has %zu entries but the geometry has %zu vertices "
+          "- ignoring it",
+          m_vertexTangent->size(),
+          numVertices);
+      m_vertexTangent = nullptr;
+    }
+  }
+
+  int slot = 0;
+  for (auto *attribute : {&m_vertexAttribute0,
+           &m_vertexAttribute1,
+           &m_vertexAttribute2,
+           &m_vertexAttribute3}) {
+    const int index = slot++;
+    if (!*attribute)
+      continue;
+    const ANARIDataType t = (*attribute)->elementType();
     if (t != ANARI_FLOAT32 && t != ANARI_FLOAT32_VEC2 && t != ANARI_FLOAT32_VEC3
         && t != ANARI_FLOAT32_VEC4) {
       reportMessage(ANARI_SEVERITY_WARNING,
-          "'vertex.attribute0' on triangle geometry must be a float, float2, "
-          "float3 or float4 array - ignoring it");
-      m_vertexAttribute0 = nullptr;
-    } else if (m_vertexAttribute0->size() != numVertices) {
+          "'vertex.attribute%d' on triangle geometry must be a float, float2, "
+          "float3 or float4 array - ignoring it",
+          index);
+      *attribute = nullptr;
+    } else if ((*attribute)->size() != numVertices) {
       reportMessage(ANARI_SEVERITY_WARNING,
-          "'vertex.attribute0' has %zu entries but the geometry has %zu "
+          "'vertex.attribute%d' has %zu entries but the geometry has %zu "
           "vertices - ignoring it",
-          m_vertexAttribute0->size(),
+          index,
+          (*attribute)->size(),
           numVertices);
-      m_vertexAttribute0 = nullptr;
+      *attribute = nullptr;
     }
   }
 
@@ -160,6 +190,91 @@ void Triangle::finalize()
 bool Triangle::isValid() const
 {
   return m_valid;
+}
+
+float Triangle::surfaceArea() const
+{
+  if (!m_valid)
+    return 0.f;
+  const size_t numVertices = m_vertexPosition->size();
+  const auto *positions = m_vertexPosition->beginAs<float3>();
+  const size_t numTriangles = m_index ? m_index->size() : numVertices / 3;
+  const uint3 *idx = m_index ? m_index->beginAs<uint3>() : nullptr;
+  double area = 0.0;
+  for (size_t i = 0; i < numTriangles; ++i) {
+    const size_t a = idx ? idx[i].x : 3 * i;
+    const size_t b = idx ? idx[i].y : 3 * i + 1;
+    const size_t c = idx ? idx[i].z : 3 * i + 2;
+    if (a >= numVertices || b >= numVertices || c >= numVertices)
+      continue;
+    const float3 e1 = positions[b] - positions[a];
+    const float3 e2 = positions[c] - positions[a];
+    area += 0.5 * double(linalg::length(linalg::cross(e1, e2)));
+  }
+  return float(area);
+}
+
+bool Triangle::displacedPositions(
+    float distance, std::vector<float> &out) const
+{
+  if (!m_valid)
+    return false;
+  const size_t numVertices = m_vertexPosition->size();
+  const auto *positions = m_vertexPosition->beginAs<float3>();
+  std::vector<float3> normals(numVertices, float3(0.f, 0.f, 0.f));
+  if (m_vertexNormal) {
+    const auto *given = m_vertexNormal->beginAs<float3>();
+    for (size_t i = 0; i < numVertices; ++i)
+      normals[i] = given[i];
+  } else {
+    // The normals of the faces around a vertex, weighted with their area.
+    const size_t numTriangles = m_index ? m_index->size() : numVertices / 3;
+    const uint3 *idx = m_index ? m_index->beginAs<uint3>() : nullptr;
+    for (size_t i = 0; i < numTriangles; ++i) {
+      const size_t a = idx ? idx[i].x : 3 * i;
+      const size_t b = idx ? idx[i].y : 3 * i + 1;
+      const size_t c = idx ? idx[i].z : 3 * i + 2;
+      if (a >= numVertices || b >= numVertices || c >= numVertices)
+        continue;
+      const float3 n = linalg::cross(
+          positions[b] - positions[a], positions[c] - positions[a]);
+      normals[a] += n;
+      normals[b] += n;
+      normals[c] += n;
+    }
+  }
+  out.resize(3 * numVertices);
+  for (size_t i = 0; i < numVertices; ++i) {
+    const float length = linalg::length(normals[i]);
+    const float3 p = length > 0.f
+        ? positions[i] + normals[i] * (distance / length)
+        : positions[i];
+    out[3 * i + 0] = p.x;
+    out[3 * i + 1] = p.y;
+    out[3 * i + 2] = p.z;
+  }
+  return true;
+}
+
+float Triangle::boundingRadius() const
+{
+  if (!m_valid || m_vertexPosition->size() == 0)
+    return 0.f;
+  const size_t numVertices = m_vertexPosition->size();
+  const auto *positions = m_vertexPosition->beginAs<float3>();
+  float3 low = positions[0], high = positions[0];
+  for (size_t i = 1; i < numVertices; ++i) {
+    low = linalg::min(low, positions[i]);
+    high = linalg::max(high, positions[i]);
+  }
+  return 0.5f * linalg::length(high - low);
+}
+
+size_t Triangle::triangleCount() const
+{
+  if (!m_valid)
+    return 0;
+  return m_index ? m_index->size() : m_vertexPosition->size() / 3;
 }
 
 const char *Triangle::rdl2ClassName() const
@@ -278,6 +393,56 @@ std::vector<Geometry::PrimitiveAttribute> Triangle::primitiveAttributes() const
     cd.rate = 4; // vertex
     if (anariColorsToRgb(*m_vertexColor, cd.values))
       attributes.push_back(std::move(cd));
+
+    // The alpha has no place in an rgb attribute: an attribute of its own,
+    // which a shading network reads by name (`rdla`).
+    std::vector<float> rgba;
+    if (anari::componentsOf(m_vertexColor->elementType()) == 4
+        && anariColorsToRgba(m_vertexColor->elementType(),
+            m_vertexColor->data(),
+            m_vertexColor->size(),
+            rgba)) {
+      PrimitiveAttribute alpha;
+      alpha.name = "anari_color_alpha";
+      alpha.type = PrimitiveAttribute::Type::Float;
+      alpha.rate = 4; // vertex
+      alpha.values.resize(rgba.size() / 4);
+      for (size_t i = 0; i < alpha.values.size(); ++i)
+        alpha.values[i] = rgba[4 * i + 3];
+      attributes.push_back(std::move(alpha));
+    }
+  }
+
+  // `vertex.tangent`: the tangent of the texture coordinates a normal map
+  // is given in, with its handedness in the fourth component. MoonRay's own
+  // materials take the tangent from the derivatives of the texture
+  // coordinates; a shading network that wants the application's reads these
+  // by name (`rdla`).
+  if (m_vertexTangent) {
+    const int components =
+        m_vertexTangent->elementType() == ANARI_FLOAT32_VEC4 ? 4 : 3;
+    std::vector<float> values;
+    if (anariFloatsToComponents(*m_vertexTangent, components, values)) {
+      const size_t n = values.size() / size_t(components);
+      PrimitiveAttribute tangent;
+      tangent.name = "anari_tangent";
+      tangent.type = PrimitiveAttribute::Type::Vec3f;
+      tangent.rate = 4; // vertex
+      tangent.values.resize(3 * n);
+      PrimitiveAttribute sign;
+      sign.name = "anari_tangent_sign";
+      sign.type = PrimitiveAttribute::Type::Float;
+      sign.rate = 4; // vertex
+      sign.values.resize(n, 1.f);
+      for (size_t i = 0; i < n; ++i) {
+        for (size_t c = 0; c < 3; ++c)
+          tangent.values[3 * i + c] = values[size_t(components) * i + c];
+        if (components == 4)
+          sign.values[i] = values[4 * i + 3];
+      }
+      attributes.push_back(std::move(tangent));
+      attributes.push_back(std::move(sign));
+    }
   }
 
   // vertex.attribute0 is also the mesh's st (uv_list, above); the generic
@@ -289,6 +454,27 @@ std::vector<Geometry::PrimitiveAttribute> Triangle::primitiveAttributes() const
     a0.rate = 4; // vertex
     if (anariFloatsToComponents(*m_vertexAttribute0, 2, a0.values))
       attributes.push_back(std::move(a0));
+  }
+
+  // Every slot as a vec3f, under a name of its own: this is what a shading
+  // network that addresses the geometry's data itself reads - a second set of
+  // texture coordinates, object-space coordinates, any per-vertex vector or
+  // color the application put there. Narrower arrays are zero filled, as
+  // ANARI's attribute expansion says; a fourth component is not carried.
+  int slot = 0;
+  for (const auto *attribute : {&m_vertexAttribute0,
+           &m_vertexAttribute1,
+           &m_vertexAttribute2,
+           &m_vertexAttribute3}) {
+    const int index = slot++;
+    if (!*attribute)
+      continue;
+    PrimitiveAttribute a;
+    a.name = attributeName(index);
+    a.type = PrimitiveAttribute::Type::Vec3f;
+    a.rate = 4; // vertex
+    if (anariFloatsToComponents(**attribute, 3, a.values))
+      attributes.push_back(std::move(a));
   }
 
   return attributes;

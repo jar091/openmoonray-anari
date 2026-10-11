@@ -25,7 +25,7 @@ struct Perspective : public Camera
   const char *rdl2ClassName() const override;
   void syncRdl2(
       scene_rdl2::rdl2::SceneObject &obj, float imageAspect) const override;
-  float2 imagePlaneHalfExtent(float imageAspect) const override;
+  float4 imagePlaneWindow(float imageAspect) const override;
 
  private:
   float m_fovy{1.0471976f}; // ANARI default: pi/3

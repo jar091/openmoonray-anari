@@ -3,6 +3,9 @@
 
 #include "Curve.h"
 
+// std
+#include <cmath>
+
 // scene_rdl2
 #include <scene_rdl2/scene/rdl2/SceneObject.h>
 #include <scene_rdl2/scene/rdl2/Types.h>
@@ -14,6 +17,10 @@ Curve::Curve(MoonrayDeviceGlobalState *s)
       m_vertexPosition(this),
       m_vertexRadius(this),
       m_vertexColor(this),
+      m_vertexAttribute0(this),
+      m_vertexAttribute1(this),
+      m_vertexAttribute2(this),
+      m_vertexAttribute3(this),
       m_index(this)
 {}
 
@@ -22,14 +29,14 @@ void Curve::commitParameters()
   m_vertexPosition = getParamObject<Array1D>("vertex.position");
   m_vertexRadius = getParamObject<Array1D>("vertex.radius");
   m_vertexColor = getParamObject<Array1D>("vertex.color");
+  m_vertexAttribute0 = getParamObject<Array1D>("vertex.attribute0");
+  m_vertexAttribute1 = getParamObject<Array1D>("vertex.attribute1");
+  m_vertexAttribute2 = getParamObject<Array1D>("vertex.attribute2");
+  m_vertexAttribute3 = getParamObject<Array1D>("vertex.attribute3");
   m_index = getParamObject<Array1D>("primitive.index");
   m_radius = getParam<float>("radius", 1.f);
 
-  reportUnsupportedParameters({"vertex.attribute0",
-      "vertex.attribute1",
-      "vertex.attribute2",
-      "vertex.attribute3",
-      "primitive.color",
+  reportUnsupportedParameters({"primitive.color",
       "primitive.attribute0",
       "primitive.attribute1",
       "primitive.attribute2",
@@ -107,6 +114,34 @@ void Curve::finalize()
           m_vertexColor->size(),
           numVertices);
       m_vertexColor = nullptr;
+    }
+  }
+
+  // The attribute slots: one value per vertex, of floats.
+  int slot = 0;
+  for (auto *attribute : {&m_vertexAttribute0,
+           &m_vertexAttribute1,
+           &m_vertexAttribute2,
+           &m_vertexAttribute3}) {
+    const int index = slot++;
+    if (!*attribute)
+      continue;
+    std::vector<float> probe;
+    if ((*attribute)->size() != numVertices) {
+      reportMessage(ANARI_SEVERITY_WARNING,
+          "'vertex.attribute%d' has %zu entries but the curve geometry has "
+          "%zu vertices - ignoring it",
+          index,
+          (*attribute)->size(),
+          numVertices);
+      *attribute = nullptr;
+    } else if (!anariFloatsToComponents(**attribute, 3, probe)) {
+      reportMessage(ANARI_SEVERITY_WARNING,
+          "'vertex.attribute%d' on curve geometry has an element type this "
+          "device cannot read (%s) - ignoring it",
+          index,
+          anari::toString((*attribute)->elementType()));
+      *attribute = nullptr;
     }
   }
 
@@ -211,7 +246,37 @@ void Curve::syncRdl2(scene_rdl2::rdl2::SceneObject &obj) const
   obj.set("curves_vertex_count", counts);
   obj.set("vertex_list_0", vertices);
   obj.set("radius_list", radii);
+
+  // vertex.attribute0 is the texture coordinate, as on the triangle geometry:
+  // what a hair shader looks the color of the scalp up with. Without it the
+  // st MoonRay gives a curve stays, which runs along the curve and across it.
+  // Always written, so that dropping the attribute really drops it.
+  scene_rdl2::rdl2::Vec2fVector uvs;
+  if (m_vertexAttribute0) {
+    std::vector<float> values;
+    if (anariFloatsToComponents(*m_vertexAttribute0, 2, values)) {
+      uvs.reserve(m_vertices.size());
+      for (uint32_t i : m_vertices)
+        uvs.emplace_back(values[2 * size_t(i)], values[2 * size_t(i) + 1]);
+    }
+  }
+  obj.set("uv_list", uvs);
 }
+
+namespace {
+
+// A random number in [0, 1) for an index (the integer hash of Thomas Wang).
+float hashToUnit(uint32_t key)
+{
+  key = (key ^ 61u) ^ (key >> 16);
+  key *= 9u;
+  key ^= key >> 4;
+  key *= 0x27d4eb2du;
+  key ^= key >> 15;
+  return float(key >> 8) * (1.f / 16777216.f);
+}
+
+} // namespace
 
 std::vector<Geometry::PrimitiveAttribute> Curve::primitiveAttributes() const
 {
@@ -233,6 +298,78 @@ std::vector<Geometry::PrimitiveAttribute> Curve::primitiveAttributes() const
       attributes.push_back(std::move(cd));
     }
   }
+
+  // The attribute slots, each a vec3f under a name of its own
+  // (Geometry::attributeName()), in the flattened vertex order.
+  int slot = 0;
+  for (const auto *attribute : {&m_vertexAttribute0,
+           &m_vertexAttribute1,
+           &m_vertexAttribute2,
+           &m_vertexAttribute3}) {
+    const int index = slot++;
+    if (!*attribute)
+      continue;
+    std::vector<float> values;
+    if (!anariFloatsToComponents(**attribute, 3, values))
+      continue;
+    PrimitiveAttribute a;
+    a.name = attributeName(index);
+    a.type = PrimitiveAttribute::Type::Vec3f;
+    a.rate = 4; // vertex
+    a.values.reserve(3 * m_vertices.size());
+    for (uint32_t i : m_vertices) {
+      a.values.push_back(values[3 * size_t(i) + 0]);
+      a.values.push_back(values[3 * size_t(i) + 1]);
+      a.values.push_back(values[3 * size_t(i) + 2]);
+    }
+    attributes.push_back(std::move(a));
+  }
+
+  // What a hair shader asks its strand for (Curve.h).
+  PrimitiveAttribute intercept, length, random, isCurve;
+  intercept.name = "anari_curve_intercept";
+  intercept.type = PrimitiveAttribute::Type::Float;
+  intercept.rate = 4; // vertex
+  intercept.values.reserve(m_vertices.size());
+  length.name = "anari_curve_length";
+  length.type = PrimitiveAttribute::Type::Float;
+  length.rate = 3; // uniform: one per curve
+  length.values.reserve(m_curveVertexCounts.size());
+  random.name = "anari_curve_random";
+  random.type = PrimitiveAttribute::Type::Float;
+  random.rate = 3;
+  random.values.reserve(m_curveVertexCounts.size());
+  isCurve.name = "anari_is_curve";
+  isCurve.type = PrimitiveAttribute::Type::Float;
+  isCurve.rate = 1; // constant
+  isCurve.values.push_back(1.f);
+
+  const auto *positions = m_vertexPosition->beginAs<float3>();
+  size_t first = 0;
+  uint32_t curveIndex = 0;
+  for (const int count : m_curveVertexCounts) {
+    float total = 0.f;
+    intercept.values.push_back(0.f);
+    for (int k = 1; k < count; ++k) {
+      const float3 a = positions[m_vertices[first + size_t(k) - 1]];
+      const float3 b = positions[m_vertices[first + size_t(k)]];
+      const float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+      total += std::sqrt(dx * dx + dy * dy + dz * dz);
+      intercept.values.push_back(total);
+    }
+    for (int k = 0; k < count; ++k) {
+      float &value = intercept.values[first + size_t(k)];
+      // A curve without length: by the index of the vertex.
+      value = total > 0.f ? value / total : float(k) / float(count - 1);
+    }
+    length.values.push_back(total);
+    random.values.push_back(hashToUnit(curveIndex++));
+    first += size_t(count);
+  }
+  attributes.push_back(std::move(intercept));
+  attributes.push_back(std::move(length));
+  attributes.push_back(std::move(random));
+  attributes.push_back(std::move(isCurve));
 
   return attributes;
 }

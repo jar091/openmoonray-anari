@@ -150,9 +150,38 @@ void Geometry::syncRdl2(scene_rdl2::rdl2::SceneObject &) const
   // Unknown subtype: nothing to write.
 }
 
+float Geometry::surfaceArea() const
+{
+  return 0.f;
+}
+
+bool Geometry::displacedPositions(float, std::vector<float> &) const
+{
+  return false;
+}
+
+float Geometry::boundingRadius() const
+{
+  return 0.f;
+}
+
+size_t Geometry::triangleCount() const
+{
+  return 0;
+}
+
 std::vector<Geometry::PrimitiveAttribute> Geometry::primitiveAttributes() const
 {
   return {};
+}
+
+const char *Geometry::attributeName(int slot)
+{
+  static const char *const names[4] = {"anari_attribute0",
+      "anari_attribute1",
+      "anari_attribute2",
+      "anari_attribute3"};
+  return slot >= 0 && slot < 4 ? names[slot] : nullptr;
 }
 
 void Geometry::reportUnsupportedParameters(

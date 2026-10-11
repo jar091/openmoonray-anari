@@ -327,15 +327,17 @@ void Frame::writeDepth()
   const float imageAspect = m_size.y > 0
       ? float(m_size.x) / float(m_size.y)
       : 1.f;
-  const float2 extent =
-      m_camera ? m_camera->imagePlaneHalfExtent(imageAspect) : float2(0.f, 0.f);
+  // (left, bottom, right, top) of what the frame shows of that plane, which
+  // is off-center when the camera has an imageRegion.
+  const float4 window = m_camera ? m_camera->imagePlaneWindow(imageAspect)
+                                 : float4(0.f, 0.f, 0.f, 0.f);
 
   for (uint32_t y = 0; y < m_size.y; ++y) {
-    const float v =
-        (2.f * (float(y) + 0.5f) / float(m_size.y) - 1.f) * extent.y;
+    const float v = window.y
+        + (float(y) + 0.5f) / float(m_size.y) * (window.w - window.y);
     for (uint32_t x = 0; x < m_size.x; ++x) {
-      const float u =
-          (2.f * (float(x) + 0.5f) / float(m_size.x) - 1.f) * extent.x;
+      const float u = window.x
+          + (float(x) + 0.5f) / float(m_size.x) * (window.z - window.x);
       const size_t i = size_t(y) * m_size.x + x;
       const float z = m_renderDepth[i];
       // MoonRay leaves the depth output at zero where nothing was hit; ANARI

@@ -10,6 +10,7 @@
 #include "backend/MoonrayScene.h"
 #include "frame/Frame.h"
 #include "spatial_field/SpatialField.h"
+#include "texture/MemoryTexture.h"
 
 #include "anari_library_moonray_queries.h"
 
@@ -232,6 +233,7 @@ void MoonrayDevice::initDevice()
   auto &state = *deviceState();
   state.scene = std::make_unique<MoonrayScene>(&state);
   state.scene->setExecutionMode(m_executionMode);
+  state.scene->setMaxMeshLights(m_maxMeshLights);
   if (!state.scene->valid()) {
     // Not fatal for object creation: the device stays usable for
     // introspection and reports the failure again when a frame is rendered.
@@ -268,9 +270,16 @@ void MoonrayDevice::deviceCommitParameters()
     m_executionMode = mode;
   }
 
+  // The bound on the lights for emitting surfaces, for applications which
+  // only set parameters of the device; the renderer parameter of the same
+  // name goes first.
+  m_maxMeshLights = getParam<int>("moonray.maxMeshLights", 64);
+
   auto *state = deviceState();
-  if (state && state->scene)
+  if (state && state->scene) {
     state->scene->setExecutionMode(m_executionMode);
+    state->scene->setMaxMeshLights(m_maxMeshLights);
+  }
 }
 
 int MoonrayDevice::deviceGetProperty(
@@ -298,6 +307,36 @@ int MoonrayDevice::deviceGetProperty(
     return 1;
   } else if (prop == "moonray.layerRebuiltLastSync" && type == ANARI_BOOL) {
     helium::writeToVoidP(mem, scene ? scene->layerRebuiltLastSync() : false);
+    return 1;
+  } else if (prop == "moonray.meshLights" && type == ANARI_INT32) {
+    // Emitting surfaces sampled by lights (`emissionSampling`): the MeshLight
+    // objects of the last sync, and how many more there would be without the
+    // bound of `moonray.maxMeshLights` (their surfaces emit as before).
+    helium::writeToVoidP(mem, scene ? scene->meshLights() : 0);
+    return 1;
+  } else if (prop == "moonray.meshLightsOverLimit" && type == ANARI_INT32) {
+    helium::writeToVoidP(mem, scene ? scene->meshLightsOverLimit() : 0);
+    return 1;
+  } else if (prop == "moonray.fragmentLoads" && type == ANARI_INT32) {
+    // `rdla` materials: how often a fragment's text has been loaded so far,
+    // how many RDL2 objects the loaded fragments consist of, and how many
+    // objects of earlier fragments are retired. An identical re-commit must
+    // not move the first; replacing a fragment moves the other two.
+    helium::writeToVoidP(mem, scene ? scene->fragmentLoads() : 0);
+    return 1;
+  } else if (prop == "moonray.fragmentObjects" && type == ANARI_INT32) {
+    helium::writeToVoidP(mem, scene ? scene->fragmentObjects() : 0);
+    return 1;
+  } else if (prop == "moonray.fragmentObjectsRetired" && type == ANARI_INT32) {
+    helium::writeToVoidP(mem, scene ? scene->fragmentObjectsRetired() : 0);
+    return 1;
+  } else if (prop == "moonray.memoryTextures" && type == ANARI_INT32) {
+    // Textures currently served to MoonRay from memory, process wide
+    // (texture/MemoryTexture.h), and the pixel memory they hold.
+    helium::writeToVoidP(mem, int(texture::memoryTextureCount()));
+    return 1;
+  } else if (prop == "moonray.memoryTextureBytes" && type == ANARI_UINT64) {
+    helium::writeToVoidP(mem, uint64_t(texture::memoryTextureBytes()));
     return 1;
   } else if (prop == "moonray.syncMillisecondsLastFrame"
       && type == ANARI_FLOAT32) {

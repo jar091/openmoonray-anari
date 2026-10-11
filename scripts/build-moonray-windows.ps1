@@ -8,10 +8,24 @@
 # first-class ISPC, CPU-only (no OptiX/Metal/XPU).
 #
 # Order: scene_rdl2 (already installed by its own script) -> mcrt_denoise ->
-# moonray. Installs into external/installs/openmoonray.
+# moonray -> moonshine. Installs into external/installs/openmoonray.
 #
 # Usage:  .\scripts\build-moonray-windows.ps1 [-Config Release|Debug]
-#             [-Target mcrt_denoise|moonray|all] [-WithDebugInfo] [-Xpu]
+#             [-Target mcrt_denoise|moonray|moonshine|anari_dso|all]
+#             [-WithDebugInfo] [-Xpu]
+#
+# anari_dso is not part of MoonRay and not part of `all`: it builds the RDL2
+# DSOs of this repository (dso/: AnariBumpNormalMap) the way moonshine is
+# built - out of tree against the *installed* MoonRay - and installs them into
+# the same prefix. It never rebuilds MoonRay; pass the same -Xpu, -OpenVdbRoot
+# and -BuildRoot the installed MoonRay was built with. The build tree is
+# <BuildRoot>\anari-dso; once it is configured, `cmake --build` and
+# `cmake --install` on it are all an incremental rebuild takes.
+#
+# moonshine is the shader library (the Dwa* materials and the pattern maps): a
+# set of RDL2 DSOs plus a few support DLLs. It is built against the *installed*
+# MoonRay (find_package(Moonray)), so `-Target moonshine` needs moonray to have
+# been installed first and never rebuilds it.
 #
 # -WithDebugInfo keeps the Release optimization settings but adds /Zi and links
 # with /DEBUG, so the installed DLLs get PDBs. That is what makes a crash
@@ -29,7 +43,7 @@
 param(
     [ValidateSet("Release", "Debug")]
     [string]$Config = "Release",
-    [ValidateSet("all", "mcrt_denoise", "moonray")]
+    [ValidateSet("all", "mcrt_denoise", "moonray", "moonshine", "anari_dso")]
     [string]$Target = "all",
     [switch]$WithDebugInfo,
     [switch]$Xpu,
@@ -59,11 +73,12 @@ foreach ($p in @($vcpkgInst, $ispcExe, (Join-Path $prefix "lib\cmake"))) {
 }
 
 # --- Source-tree self-alias junctions ---------------------------------------
-# Both checkouts carry git symlinks that let their own sources include
-# <moonray/...> / <mcrt_denoise/...>:
+# The checkouts carry git symlinks that let their own sources include
+# <moonray/...> / <mcrt_denoise/...> / <moonshine/...>:
 #     moonray/moonray            -> lib
 #     moonray/include/moonray     -> ../lib/
 #     mcrt_denoise/mcrt_denoise   -> lib
+#     moonshine/include/moonshine -> ../lib
 # Without symlink support git materializes them as small text files, so those
 # includes fail. Replace each with an NTFS junction (unprivileged).
 function Repair-SelfAlias {
@@ -98,9 +113,10 @@ function Repair-SelfAlias {
 }
 
 # mcrt_denoise has no tracked self-alias upstream and builds without one, so
-# only moonray's two are repaired here.
+# only moonray's two and moonshine's one are repaired here.
 Repair-SelfAlias (Join-Path $srcRoot "moonray\moonray") (Join-Path $srcRoot "moonray\lib")
 Repair-SelfAlias (Join-Path $srcRoot "moonray\include\moonray") (Join-Path $srcRoot "moonray\lib")
+Repair-SelfAlias (Join-Path $srcRoot "moonshine\include\moonshine") (Join-Path $srcRoot "moonshine\lib")
 
 # --- VS2022 x64 developer environment ---------------------------------------
 if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
@@ -209,9 +225,11 @@ function Invoke-Native {
 }
 
 function Build-Project {
-    param([string]$Name, [string[]]$ExtraArgs)
+    # $Source: the source directory, for a project that is not one of
+    # MoonRay's own (those live in $srcRoot\$Name).
+    param([string]$Name, [string[]]$ExtraArgs, [string]$Source = "")
 
-    $src = Join-Path $srcRoot $Name
+    $src = if ($Source) { $Source } else { Join-Path $srcRoot $Name }
     $build = Join-Path $BuildRoot "$Name$(if ($Config -eq 'Debug') { '-debug' } else { '' })"
 
     Write-Host ""
@@ -265,6 +283,23 @@ if ($Target -in @("all", "moonray")) {
         "-DMOONRAY_BUILD_TESTING=NO",
         "-DMOONRAY_USE_METAL=NO"
     ) + $moonrayGpuArgs)
+}
+
+if ($Target -in @("all", "moonshine")) {
+    # Standalone against the installed MoonRay. The installed MoonrayTargets
+    # reference CUDA::cudart / OptiX::OptiX when MoonRay was built with -Xpu,
+    # and MoonrayConfig only looks for those packages when MOONRAY_USE_OPTIX
+    # is set, so the same GPU arguments are passed here.
+    Build-Project "moonshine" (@(
+        "-DMOONSHINE_BUILD_TESTING=NO"
+    ) + $moonrayGpuArgs)
+}
+
+if ($Target -eq "anari_dso") {
+    # This repository's own RDL2 DSOs (dso/): standalone against the installed
+    # MoonRay like moonshine, hence the same GPU arguments. Deliberately not
+    # part of "all", which is MoonRay itself.
+    Build-Project "anari-dso" $moonrayGpuArgs (Join-Path $repoRoot "dso")
 }
 
 Write-Host ""

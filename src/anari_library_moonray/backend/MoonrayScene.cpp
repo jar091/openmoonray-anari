@@ -23,7 +23,12 @@
 // std
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <map>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -77,9 +82,249 @@ rdl2::Mat4d toRdl2(const mat4 &m)
       rdl2::Vec4d(m[3].x, m[3].y, m[3].z, m[3].w));
 }
 
+// An attribute that refers to another scene object.
+void setObject(
+    rdl2::SceneObject *obj, const char *attribute, rdl2::SceneObject *value)
+{
+  obj->set(
+      obj->getSceneClass().getAttributeKey<rdl2::SceneObject *>(attribute),
+      value);
+}
+
 helium::TimeStamp newest(helium::TimeStamp a, helium::TimeStamp b)
 {
   return a > b ? a : b;
+}
+
+// What a network of maps reads that the mesh of a light does not have. Bit 1
+// (MoonrayScene::ReadsInstance): something that differs between the
+// instances of one geometry - a space of the object or of the instance (a
+// `space`, `from_space` or `to_space` set to one of those), or one of the
+// primitive attributes the device gives every instance (`anari_object_...`).
+// Bit 2 (ReadsView): the direction of view (the `observer direction` of an
+// AttributeMap) or the side which is hit (TwoSidedMap), and the maps which
+// shade by the view.
+unsigned mapReads(rdl2::SceneObject *root)
+{
+  unsigned reads = 0;
+  std::vector<rdl2::SceneObject *> open{root};
+  std::set<rdl2::SceneObject *> seen;
+  while (!open.empty()) {
+    rdl2::SceneObject *obj = open.back();
+    open.pop_back();
+    if (!obj || !seen.insert(obj).second)
+      continue;
+    const rdl2::SceneClass &sceneClass = obj->getSceneClass();
+    const std::string &className = sceneClass.getName();
+    if (className == "TwoSidedMap" || className == "ToonMap"
+        || className == "DirectionalMap") {
+      reads |= 2u;
+    }
+    for (auto it = sceneClass.beginAttributes(); it != sceneClass.endAttributes();
+        ++it) {
+      const rdl2::Attribute *attribute = *it;
+      const std::string &name = attribute->getName();
+      switch (attribute->getType()) {
+      case rdl2::TYPE_INT:
+        if (attribute->isEnumerable()
+            && name.find("space") != std::string::npos) {
+          try {
+            const std::string &space = attribute->getEnumDescription(
+                obj->get(rdl2::AttributeKey<rdl2::Int>(*attribute)));
+            if (space.find("object") != std::string::npos
+                || space.find("instance") != std::string::npos) {
+              reads |= 1u;
+            }
+          } catch (const std::exception &) {
+            // not one of the values of the enumeration
+          }
+        } else if (attribute->isEnumerable() && name == "map_type") {
+          try {
+            if (attribute->getEnumDescription(
+                    obj->get(rdl2::AttributeKey<rdl2::Int>(*attribute)))
+                == "observer direction") {
+              reads |= 2u;
+            }
+          } catch (const std::exception &) {
+          }
+        }
+        break;
+      case rdl2::TYPE_STRING:
+        if (name == "primitive_attribute_name"
+            && obj->get(rdl2::AttributeKey<rdl2::String>(*attribute))
+                    .compare(0, 13, "anari_object_")
+                == 0) {
+          reads |= 1u;
+        }
+        break;
+      case rdl2::TYPE_SCENE_OBJECT:
+        open.push_back(
+            obj->get(rdl2::AttributeKey<rdl2::SceneObject *>(*attribute)));
+        break;
+      case rdl2::TYPE_SCENE_OBJECT_VECTOR:
+        for (rdl2::SceneObject *other : obj->get(
+                 rdl2::AttributeKey<rdl2::SceneObjectVector>(*attribute))) {
+          open.push_back(other);
+        }
+        break;
+      default:
+        break;
+      }
+      if (attribute->isBindable())
+        open.push_back(obj->getBinding(*attribute));
+    }
+  }
+  return reads;
+}
+
+// Back to what a newly created object is: every attribute at its default and
+// nothing bound. resetAllToDefault() alone keeps the bindings, and a binding
+// that survives is a map that keeps shading.
+void resetObject(rdl2::SceneObject *obj)
+{
+  rdl2::SceneObject::UpdateGuard guard(obj);
+  const rdl2::SceneClass &sceneClass = obj->getSceneClass();
+  for (auto it = sceneClass.beginAttributes(); it != sceneClass.endAttributes();
+      ++it) {
+    const rdl2::Attribute *attribute = *it;
+    if (attribute->isBindable() && obj->getBinding(*attribute))
+      obj->setBinding(*attribute, nullptr);
+  }
+  obj->resetAllToDefault();
+}
+
+// Whether a shader of an `rdla` fragment can be absent at a point: a
+// `presence` that is not simply one (the Dwa materials), or
+// UsdPreviewSurface's cutout.
+bool objectUsesPresence(const rdl2::SceneObject *obj)
+{
+  const rdl2::SceneClass &sceneClass = obj->getSceneClass();
+  for (auto it = sceneClass.beginAttributes(); it != sceneClass.endAttributes();
+      ++it) {
+    const rdl2::Attribute *attribute = *it;
+    if (attribute->getType() != rdl2::TYPE_FLOAT)
+      continue;
+    const rdl2::AttributeKey<rdl2::Float> key(*attribute);
+    const bool bound =
+        attribute->isBindable() && obj->getBinding(*attribute) != nullptr;
+    if (attribute->getName() == "presence" && (bound || obj->get(key) != 1.f))
+      return true;
+    if (attribute->getName() == "opacityThreshold"
+        && (bound || obj->get(key) > 0.f))
+      return true;
+  }
+  return false;
+}
+
+// What an `rdla` fragment consists of: (object name, SceneClass name).
+using FragmentContents = std::vector<std::pair<std::string, std::string>>;
+
+// Deletes every object of `context` but its SceneVariables. Only for a
+// context MoonRay never rendered: nothing may hold on to the objects.
+void clearContext(rdl2::SceneContext &context)
+{
+  std::vector<std::string> names;
+  for (auto it = context.beginSceneObject(); it != context.endSceneObject();
+      ++it) {
+    if (it->second != &context.getSceneVariables())
+      names.push_back(it->first);
+  }
+  for (const auto &name : names)
+    context.deleteSceneObject(name);
+}
+
+// Loads `fragment` into `scratch`, a SceneContext that exists for nothing
+// else, and reports what it creates. This is where a fragment fails - a Lua
+// error, a SceneClass that is not installed, an attribute the class does not
+// have, a binding of the wrong type, a missing root - so that nothing of a
+// broken fragment ever reaches the scene being rendered, and it is the only
+// way to learn which objects the text refers to: the reader creates an object
+// or silently picks up an existing one of that name, and the real scene
+// cannot tell the two apart. `scratch` is left empty again, keeping only the
+// SceneClasses it had to load, which is most of what an inspection costs.
+bool inspectFragment(rdl2::SceneContext &scratch,
+    const Material::Fragment &fragment,
+    FragmentContents &contents,
+    std::string &error)
+{
+  contents.clear();
+
+  struct ClearOnExit
+  {
+    rdl2::SceneContext &context;
+    ~ClearOnExit()
+    {
+      try {
+        clearContext(context);
+      } catch (...) {
+        // An object that will not go only costs its memory.
+      }
+    }
+  } clearOnExit{scratch};
+
+  try {
+    rdl2::AsciiReader reader(scratch);
+    // An attribute the class does not have, a value of the wrong type and a
+    // binding to an attribute that cannot be bound are only warnings to the
+    // reader, which then carries on without them. For a generated fragment
+    // they mean the material is not what was asked for.
+    reader.setWarningsAsErrors(true);
+    reader.fromString(fragment.source, "@rdla material");
+
+    for (auto it = scratch.beginSceneObject(); it != scratch.endSceneObject();
+        ++it) {
+      const rdl2::SceneObject *obj = it->second;
+      if (obj == &scratch.getSceneVariables())
+        continue;
+      // Materials, maps, normal maps, displacements and volume shaders. A
+      // camera, a light, a render output or a layer in a fragment would
+      // become part of the device's scene behind its back.
+      if (!obj->isA<rdl2::Shader>()) {
+        error = "the fragment creates " + obj->getSceneClass().getName()
+            + "(\"" + obj->getName()
+            + "\"), which is neither a material nor a map";
+        return false;
+      }
+      // RDL2 lets any object be bound to a bindable attribute; MoonRay then
+      // samples it as a Map without looking (shading::evalColor()), and
+      // anything else is a crash on a render thread.
+      const rdl2::SceneClass &sceneClass = obj->getSceneClass();
+      for (auto a = sceneClass.beginAttributes();
+          a != sceneClass.endAttributes();
+          ++a) {
+        if (!(*a)->isBindable())
+          continue;
+        const rdl2::SceneObject *bound = obj->getBinding(**a);
+        if (bound && !bound->isA<rdl2::Map>()) {
+          error = bound->getSceneClass().getName() + "(\"" + bound->getName()
+              + "\") is bound to '" + (*a)->getName() + "' of \""
+              + obj->getName() + "\", but only a Map can be bound";
+          return false;
+        }
+      }
+      contents.emplace_back(obj->getName(), obj->getSceneClass().getName());
+    }
+
+    if (!scratch.sceneObjectExists(fragment.materialName)) {
+      error = "the fragment does not create an object named \""
+          + fragment.materialName + "\" ('materialName')";
+      return false;
+    }
+    const rdl2::SceneObject *root =
+        scratch.getSceneObject(fragment.materialName);
+    if (!root->isA<rdl2::Material>()) {
+      error = "'materialName' names " + root->getSceneClass().getName()
+          + "(\"" + fragment.materialName + "\"), which is not a Material";
+      return false;
+    }
+  } catch (const std::exception &e) {
+    error = e.what();
+    return false;
+  } catch (...) {
+    error = "unknown exception while reading the fragment";
+    return false;
+  }
+  return true;
 }
 
 } // namespace
@@ -107,6 +352,8 @@ MoonrayScene::~MoonrayScene()
     m_backend->execute([this]() {
       std::lock_guard<std::mutex> guard(m_ctxMutex);
       m_objects.clear();
+      m_fragments.clear();
+      m_fragmentScratch.reset();
       m_ctx.reset();
     });
   } catch (const std::exception &e) {
@@ -154,6 +401,36 @@ bool MoonrayScene::layerRebuiltLastSync() const
 float MoonrayScene::syncMillisecondsLastFrame() const
 {
   return m_syncMilliseconds;
+}
+
+int MoonrayScene::fragmentLoads() const
+{
+  return m_fragmentLoads;
+}
+
+int MoonrayScene::fragmentObjects() const
+{
+  return m_fragmentObjects;
+}
+
+int MoonrayScene::fragmentObjectsRetired() const
+{
+  return m_fragmentObjectsRetired;
+}
+
+int MoonrayScene::meshLights() const
+{
+  return int(m_meshLights.size());
+}
+
+int MoonrayScene::meshLightsOverLimit() const
+{
+  return m_meshLightsOverLimit;
+}
+
+void MoonrayScene::setMaxMeshLights(int count)
+{
+  m_deviceMaxMeshLights = std::max(0, count);
 }
 
 void MoonrayScene::setExecutionMode(const std::string &mode)
@@ -231,6 +508,397 @@ void MoonrayScene::retireObject(const std::string &name)
   }
 }
 
+rdl2::Material *MoonrayScene::errorMaterial()
+{
+  if (!m_errorMaterial) {
+    rdl2::SceneObject *obj =
+        createObject("UsdPreviewSurface", "/anari/material/error");
+    rdl2::SceneObject::UpdateGuard guard(obj);
+    // Magenta whatever the lighting: a diffuse surface under no light would
+    // be as black as the bug it is supposed to point at.
+    obj->set("diffuseColor", rdl2::Rgb(1.f, 0.f, 1.f));
+    obj->set("emissiveColor", rdl2::Rgb(0.5f, 0.f, 0.5f));
+    obj->set("useSpecularWorkflow", 0);
+    obj->set("metallic", 0.f);
+    obj->set("roughness", 1.f);
+    obj->set("clearcoat", 0.f);
+    obj->set("ior", 1.f);
+    m_errorMaterial = obj->asA<rdl2::Material>();
+  }
+  return m_errorMaterial;
+}
+
+void MoonrayScene::holdMaterial(rdl2::SceneObject *material)
+{
+  if (!material || !material->isA<rdl2::Material>()
+      || !m_heldMaterials.insert(material->getName()).second) {
+    return;
+  }
+  auto *layer = createObject("Layer", "MeshLightLayer")->asA<rdl2::Layer>();
+  auto *lightSet =
+      createObject("LightSet", "MeshLightLightSet")->asA<rdl2::LightSet>();
+  auto *holder = createObject("RdlMeshGeometry", "/anari/materialHolder")
+                     ->asA<rdl2::Geometry>();
+  rdl2::SceneObject::UpdateGuard guard(layer);
+  layer->assign(holder,
+      material->getName(),
+      material->asA<rdl2::Material>(),
+      lightSet,
+      /*displacement=*/nullptr,
+      /*volumeShader=*/nullptr);
+}
+
+void MoonrayScene::retireFragmentObjects(FragmentState &state)
+{
+  rdl2::SceneContext &sc = m_ctx->getSceneContext();
+  for (const auto &name : state.objects) {
+    if (sc.sceneObjectExists(name))
+      resetObject(sc.getSceneObject(name));
+    m_fragmentObjectOwner[name] = 0;
+  }
+  m_fragmentObjects -= int(state.objects.size());
+  m_fragmentObjectsRetired += int(state.objects.size());
+  state.objects.clear();
+  state.root = nullptr;
+}
+
+void MoonrayScene::retireUnusedFragments()
+{
+  // RDL2 objects are never deleted (see retireObject()), so the objects of a
+  // material that has left the scene - released, or merely not assigned to
+  // anything any more - are reset to their defaults, which lets go of what
+  // they hold. A material that comes back is loaded again.
+  for (auto it = m_fragments.begin(); it != m_fragments.end();) {
+    if (it->second.used) {
+      ++it;
+      continue;
+    }
+    retireFragmentObjects(it->second);
+    it = m_fragments.erase(it);
+    ++m_fragmentsRetired;
+  }
+}
+
+rdl2::Material *MoonrayScene::syncFragment(
+    const Material *material, const Material::Fragment &fragment)
+{
+  const uint64_t id = material->syncId();
+  FragmentState &state = m_fragments[id];
+  state.used = true;
+
+  // The same text with the same images is not read again, however often the
+  // application commits it. The images are compared as textures: an image
+  // whose pixels did not change still has the texture it had.
+  std::vector<Material::FragmentImage> images = material->fragmentImages();
+  bool sameImages = images.size() == state.images.size();
+  for (size_t i = 0; sameImages && i < images.size(); ++i) {
+    sameImages = images[i].name == state.images[i].name
+        && images[i].texture == state.images[i].texture;
+  }
+  const bool retry = !state.root && state.retiredAtLoad != m_fragmentsRetired;
+  if (state.version == fragment.version && state.version != 0 && sameImages
+      && !retry) {
+    ++m_objectsUnchanged;
+    return state.root ? state.root : errorMaterial();
+  }
+  state.version = fragment.version;
+  state.retiredAtLoad = m_fragmentsRetired;
+  state.emitterReported = false;
+  state.readsChecked = false;
+  ++m_objectsUpdated;
+  ++m_fragmentLoads;
+
+  rdl2::SceneContext &sc = m_ctx->getSceneContext();
+
+  std::string error;
+  FragmentContents contents;
+  bool ok = true;
+  if (fragment.source.empty() || fragment.materialName.empty()) {
+    error = "'source' and 'materialName' are both required";
+    ok = false;
+  }
+  const auto loadStart = std::chrono::steady_clock::now();
+  if (ok && !m_fragmentScratch) {
+    try {
+      m_fragmentScratch = std::make_unique<rdl2::SceneContext>();
+      m_fragmentScratch->setDsoPath(sc.getDsoPath());
+    } catch (const std::exception &e) {
+      error = e.what();
+      ok = false;
+    }
+  }
+  ok = ok && inspectFragment(*m_fragmentScratch, fragment, contents, error);
+  const auto inspected = std::chrono::steady_clock::now();
+
+  // The names have to be this material's to use: its own from an earlier
+  // version, retired ones, or new ones. And because RDL2 objects are never
+  // deleted, a name keeps the SceneClass it was first created with.
+  for (size_t i = 0; ok && i < contents.size(); ++i) {
+    const std::string &name = contents[i].first;
+    const std::string &className = contents[i].second;
+    auto owner = m_fragmentObjectOwner.find(name);
+    if (owner != m_fragmentObjectOwner.end()) {
+      if (owner->second != 0 && owner->second != id) {
+        error = "the object name \"" + name
+            + "\" is already used by another rdla material";
+        ok = false;
+      }
+    } else if (sc.sceneObjectExists(name)) {
+      error = "the object name \"" + name
+          + "\" is used by the device's own scene";
+      ok = false;
+    }
+    if (ok && sc.sceneObjectExists(name)) {
+      const std::string &existing =
+          sc.getSceneObject(name)->getSceneClass().getName();
+      if (existing != className) {
+        error = "the object \"" + name + "\" was created as " + existing
+            + " earlier and cannot become " + className
+            + ": RDL2 objects are never deleted, so an object that changes "
+              "its class needs a new name";
+        ok = false;
+      }
+    }
+  }
+
+  // Whatever the previous version set must not survive: an attribute or a
+  // binding the new text no longer mentions would otherwise keep its old
+  // value, and an object it no longer has would keep shading through
+  // whatever still points at it. Both are a reset; the reader then writes
+  // the new state into the objects that stay.
+  retireFragmentObjects(state);
+
+  if (ok) {
+    try {
+      rdl2::AsciiReader reader(sc);
+      reader.setWarningsAsErrors(true);
+      reader.fromString(fragment.source, "@rdla material");
+    } catch (const std::exception &e) {
+      error = e.what();
+      ok = false;
+    } catch (...) {
+      error = "unknown exception while reading the fragment";
+      ok = false;
+    }
+
+    // Owned from here on, also after a failure: the next load, or the
+    // material going away, resets them.
+    for (const auto &entry : contents) {
+      const std::string &name = entry.first;
+      if (!sc.sceneObjectExists(name))
+        continue;
+      auto owner = m_fragmentObjectOwner.find(name);
+      if (owner != m_fragmentObjectOwner.end() && owner->second == 0)
+        --m_fragmentObjectsRetired;
+      m_fragmentObjectOwner[name] = id;
+      state.objects.push_back(name);
+    }
+    m_fragmentObjects += int(state.objects.size());
+  }
+
+  if (ok) {
+    // The images: a string attribute whose value is the name of one of the
+    // material's image parameters gets the name of that image's texture.
+    for (const auto &name : state.objects) {
+      rdl2::SceneObject *obj = sc.getSceneObject(name);
+      const rdl2::SceneClass &sceneClass = obj->getSceneClass();
+      for (auto it = sceneClass.beginAttributes();
+          it != sceneClass.endAttributes();
+          ++it) {
+        const rdl2::Attribute *attribute = *it;
+        if (attribute->getType() == rdl2::TYPE_STRING_VECTOR) {
+          // A list of textures: each name that is an image parameter.
+          const rdl2::AttributeKey<rdl2::StringVector> listKey(*attribute);
+          rdl2::StringVector names = obj->get(listKey);
+          bool replaced = false;
+          for (std::string &entry : names) {
+            for (const auto &image : images) {
+              if (entry == image.name) {
+                entry = image.texture->name();
+                replaced = true;
+                break;
+              }
+            }
+          }
+          if (replaced) {
+            rdl2::SceneObject::UpdateGuard guard(obj);
+            obj->set(listKey, names);
+          }
+          continue;
+        }
+        if (attribute->getType() != rdl2::TYPE_STRING)
+          continue;
+        const rdl2::AttributeKey<rdl2::String> key(*attribute);
+        const std::string value = obj->get(key);
+        if (value.empty())
+          continue;
+        bool isImage = false;
+        for (const auto &image : images) {
+          if (value == image.name) {
+            rdl2::SceneObject::UpdateGuard guard(obj);
+            obj->set(key, image.texture->name());
+            isImage = true;
+            break;
+          }
+        }
+        // A texture name nothing stands behind is not an error to MoonRay -
+        // the map renders the scene's fatal color and a line goes to
+        // MoonRay's own log - so the application is told here.
+        std::error_code ec;
+        if (!isImage && attribute->isFilename()
+            && value.find("<UDIM>") == std::string::npos
+            && !std::filesystem::exists(value, ec)) {
+          material->reportMessage(ANARI_SEVERITY_WARNING,
+              "'%s' of %s(\"%s\") in the rdla material is \"%s\", which is "
+              "neither an image parameter of the material (an image2D sampler "
+              "with an image) nor a file - MoonRay renders its error color "
+              "there",
+              attribute->getName().c_str(),
+              sceneClass.getName().c_str(),
+              name.c_str(),
+              value.c_str());
+        }
+      }
+    }
+
+    state.root = sc.getSceneObject(fragment.materialName)->asA<rdl2::Material>();
+    if (!state.root) {
+      error = "\"" + fragment.materialName + "\" is not a Material";
+      ok = false;
+    }
+  }
+  if (ok) {
+    // What a RaySwitchMaterial of the fragment switches to.
+    for (const auto &name : state.objects)
+      holdMaterial(sc.getSceneObject(name));
+  }
+
+  // The textures of the previous version are let go here, after the objects
+  // have been pointed at the new ones (or reset).
+  state.images = std::move(images);
+
+  state.usesPresence = false;
+  if (ok) {
+    for (const auto &name : state.objects)
+      state.usesPresence = state.usesPresence
+          || objectUsesPresence(sc.getSceneObject(name));
+  }
+
+  if (std::getenv("OPENMOONRAY_ANARI_DEBUG_FRAGMENT")) {
+    const auto done = std::chrono::steady_clock::now();
+    std::fprintf(stderr,
+        "[moonray] rdla \"%s\": %zu object(s), %zu image(s), inspected in "
+        "%.2f ms, applied in %.2f ms, %s\n",
+        fragment.materialName.c_str(),
+        contents.size(),
+        state.images.size(),
+        std::chrono::duration<float, std::milli>(inspected - loadStart).count(),
+        std::chrono::duration<float, std::milli>(done - inspected).count(),
+        ok ? "loaded" : "failed");
+  }
+
+  if (!ok) {
+    // Nothing of a fragment that failed half way stays in effect.
+    for (const auto &name : state.objects) {
+      if (sc.sceneObjectExists(name))
+        resetObject(sc.getSceneObject(name));
+    }
+    state.root = nullptr;
+    material->reportMessage(ANARI_SEVERITY_ERROR,
+        "the rdla material could not be loaded and renders with the error "
+        "material: %s",
+        error.c_str());
+    return errorMaterial();
+  }
+
+  return state.root;
+}
+
+bool MoonrayScene::fragmentEmitter(const Material *material,
+    const Material::Emitter &emitter,
+    rdl2::Material *&sampledRoot,
+    rdl2::SceneObject *&emissionMap)
+{
+  auto found = m_fragments.find(material->syncId());
+  if (found == m_fragments.end() || !found->second.root)
+    return false; // not loaded: the error material, reported there
+  FragmentState &state = found->second;
+  rdl2::SceneContext &sc = m_ctx->getSceneContext();
+
+  // Only objects of this fragment: a name of another material or of the
+  // device's own scene is not the application's to point a light at.
+  const auto owned = [&](const std::string &name) {
+    return std::find(state.objects.begin(), state.objects.end(), name)
+        != state.objects.end()
+        && sc.sceneObjectExists(name);
+  };
+  std::string error;
+  rdl2::SceneObject *root = nullptr;
+  rdl2::SceneObject *map = nullptr;
+  if (!owned(emitter.sampledMaterialName)) {
+    error = "the fragment does not create an object named \""
+        + emitter.sampledMaterialName + "\" ('sampledMaterialName')";
+  } else {
+    root = sc.getSceneObject(emitter.sampledMaterialName);
+    if (!root->isA<rdl2::Material>())
+      error = "'sampledMaterialName' names " + root->getSceneClass().getName()
+          + ", which is not a Material";
+  }
+  if (error.empty() && !emitter.mapName.empty()) {
+    if (!owned(emitter.mapName)) {
+      error = "the fragment does not create an object named \""
+          + emitter.mapName + "\" ('emissionMap')";
+    } else {
+      map = sc.getSceneObject(emitter.mapName);
+      if (!map->isA<rdl2::Map>())
+        error = "'emissionMap' names " + map->getSceneClass().getName()
+            + ", which is not a Map";
+    }
+  }
+  if (!error.empty()) {
+    if (!state.emitterReported) {
+      state.emitterReported = true;
+      material->reportMessage(ANARI_SEVERITY_WARNING,
+          "the emission of the rdla material is not sampled by lights: %s",
+          error.c_str());
+    }
+    return false;
+  }
+  sampledRoot = root->asA<rdl2::Material>();
+  emissionMap = map;
+  return true;
+}
+
+unsigned MoonrayScene::emissionReads(
+    const Material *material, const Material::Emitter &emitter)
+{
+  if (emitter.mapName.empty())
+    return 0;
+  auto found = m_fragments.find(material->syncId());
+  if (found == m_fragments.end() || !found->second.root)
+    return 0;
+  FragmentState &state = found->second;
+  if (state.readsChecked && state.readsCheckedMap == emitter.mapName)
+    return state.reads;
+  rdl2::SceneContext &sc = m_ctx->getSceneContext();
+  state.readsChecked = true;
+  state.readsCheckedMap = emitter.mapName;
+  const bool owned = std::find(state.objects.begin(),
+                         state.objects.end(),
+                         emitter.mapName)
+          != state.objects.end()
+      && sc.sceneObjectExists(emitter.mapName);
+  state.reads = owned ? mapReads(sc.getSceneObject(emitter.mapName)) : 0;
+  if ((state.reads & ReadsView) != 0) {
+    material->reportMessage(ANARI_SEVERITY_INFO,
+        "the emission of the rdla material depends on the direction of view "
+        "or on the side which is hit ('emissionMap' \"%s\"): it is not "
+        "sampled by lights",
+        emitter.mapName.c_str());
+  }
+  return state.reads;
+}
+
 void MoonrayScene::writeGeometry(const Geometry *geometry,
     rdl2::SceneObject *obj,
     const std::string &name)
@@ -243,8 +911,13 @@ void MoonrayScene::writeGeometry(const Geometry *geometry,
     if (attribute.values.empty())
       continue;
 
-    rdl2::SceneObject *dataObj =
-        createObject("UserData", name + "/attribute/" + attribute.name);
+    // One UserData object per attribute. MoonRay keys an attribute on name
+    // and type, and a geometry may export the same name as two types
+    // (Geometry::attributeName()), so the vec3f ones say so in their name.
+    const bool isVec3f =
+        attribute.type == Geometry::PrimitiveAttribute::Type::Vec3f;
+    rdl2::SceneObject *dataObj = createObject("UserData",
+        name + "/attribute/" + attribute.name + (isVec3f ? ".vec3f" : ""));
     {
       rdl2::SceneObject::UpdateGuard guard(dataObj);
       dataObj->set("rate", attribute.rate);
@@ -300,6 +973,70 @@ void MoonrayScene::writeGeometry(const Geometry *geometry,
   obj->set("primitive_attributes", userData);
 }
 
+void MoonrayScene::appendObjectInfo(const std::vector<Instance *> &instances,
+    rdl2::SceneObject *obj,
+    const std::string &name,
+    bool instancer)
+{
+  bool anyColor = false, anyRandom = false, anyIndex = false;
+  for (const Instance *instance : instances) {
+    anyColor = anyColor || instance->hasObjectColor();
+    anyRandom = anyRandom || instance->hasObjectRandom();
+    anyIndex = anyIndex || instance->id() != ~0u;
+  }
+
+  const rdl2::AttributeKey<rdl2::SceneObjectVector> key =
+      obj->getSceneClass().getAttributeKey<rdl2::SceneObjectVector>(
+          "primitive_attributes");
+  rdl2::SceneObjectVector userData = obj->get(key);
+  // One value for a geometry (constant), one per instance for an instancer
+  // (0: MoonRay tells by the number of values).
+  const int rate = instancer ? 0 : 1;
+
+  // Primitive attributes a shading network reads by name (AttributeMap).
+  if (anyColor) {
+    rdl2::SceneObject *dataObj =
+        createObject("UserData", name + "/attribute/anari_object_color");
+    rdl2::RgbVector values;
+    for (const Instance *instance : instances) {
+      const float4 &c = instance->objectColor();
+      values.emplace_back(c.x, c.y, c.z);
+    }
+    rdl2::SceneObject::UpdateGuard guard(dataObj);
+    dataObj->set("rate", rate);
+    dataObj->set("color_key", std::string("anari_object_color"));
+    dataObj->set("color_values_0", values);
+    userData.push_back(dataObj);
+  }
+  if (anyRandom) {
+    rdl2::SceneObject *dataObj =
+        createObject("UserData", name + "/attribute/anari_object_random");
+    rdl2::FloatVector values;
+    for (const Instance *instance : instances)
+      values.push_back(instance->objectRandom());
+    rdl2::SceneObject::UpdateGuard guard(dataObj);
+    dataObj->set("rate", rate);
+    dataObj->set("float_key", std::string("anari_object_random"));
+    dataObj->set("float_values_0", values);
+    userData.push_back(dataObj);
+  }
+  if (anyIndex) {
+    rdl2::SceneObject *dataObj =
+        createObject("UserData", name + "/attribute/anari_object_index");
+    rdl2::FloatVector values;
+    for (const Instance *instance : instances)
+      values.push_back(instance->id() != ~0u ? float(instance->id()) : 0.f);
+    rdl2::SceneObject::UpdateGuard guard(dataObj);
+    dataObj->set("rate", rate);
+    dataObj->set("float_key", std::string("anari_object_index"));
+    dataObj->set("float_values_0", values);
+    userData.push_back(dataObj);
+  }
+
+  rdl2::SceneObject::UpdateGuard guard(obj);
+  obj->set(key, userData);
+}
+
 void MoonrayScene::syncSurfaces(World *world,
     scene_rdl2::rdl2::SceneObject *lightSetObj,
     scene_rdl2::rdl2::SceneObject *geometrySetObj,
@@ -340,6 +1077,144 @@ void MoonrayScene::syncSurfaces(World *world,
   std::vector<rdl2::Geometry *> renderGeometries;
   std::vector<LayerAssignment> assignments;
 
+  // `rdla` materials that are no longer in the scene are retired before any
+  // of the ones that are is loaded: an application that replaces a material
+  // object by a new one with the same fragment gives the new one the names
+  // the old one still holds.
+  for (auto &entry : m_fragments)
+    entry.second.used = false;
+  m_needPresenceShadows = false;
+  for (Group *group : groupOrder) {
+    for (auto *surface : group->surfaces()) {
+      if (!surface || !surface->isValid())
+        continue;
+      m_needPresenceShadows =
+          m_needPresenceShadows || surface->material()->usesPresence();
+      if (!surface->material()->fragment())
+        continue;
+      auto known = m_fragments.find(surface->material()->syncId());
+      if (known != m_fragments.end())
+        known->second.used = true;
+    }
+  }
+  retireUnusedFragments();
+
+  // --- which emitters lights sample ---------------------------------------
+  // One MeshLight serves a surface: its mesh holds the sampled sides of all
+  // instances - of every group the surface is in - which the same rays see.
+  // Unless the map of the emission reads the space of the object or what an
+  // instance has of its own (emissionReads()): then every instance is a
+  // light, with its sides. An emission which reads the direction of view or
+  // the side which is hit stays with the surface: a light has neither. MoonRay samples every light at every hit and
+  // intersects every sampled direction with every mesh light, so the number
+  // of lights is bounded (`moonray.maxMeshLights`), and so is the number of
+  // triangles their meshes have together (`moonray.maxMeshLightTriangles`:
+  // MoonRay builds the sampling structure of a light again for every edit
+  // of it); the emitters with the most power get the lights. All instances of a surface or none: they share one
+  // material, which either emits for all rays or leaves that to the light.
+  // An instance no diffuse or glossy ray sees lights nothing.
+  const uint32_t litBy = visibility::DiffuseReflection
+      | visibility::DiffuseTransmission | visibility::GlossyReflection
+      | visibility::GlossyTransmission | visibility::Phase;
+  // The sampled surfaces, and whether each instance is a light of its own.
+  std::map<const Surface *, bool> sampledSurfaces;
+  m_meshLightsOverLimit = 0;
+  {
+    struct Candidate
+    {
+      const Surface *surface;
+      bool perInstance;
+      std::vector<uint32_t> seenBy;
+      int instances;
+      size_t triangles;
+      float power;
+      int lights() const
+      {
+        return perInstance ? instances : int(seenBy.size());
+      }
+    };
+    std::vector<Candidate> candidates;
+    int loadedEarly = 0;
+    for (Group *group : groupOrder) {
+      for (auto *surface : group->surfaces()) {
+        if (!surface || !surface->isValid())
+          continue;
+        const Material *material = surface->material();
+        const Material::Emitter emitter = material->emitter();
+        const float area = surface->geometry()->surfaceArea();
+        if (emitter.sides == 0 || !(area > 0.f))
+          continue;
+        const int sides = (emitter.sides & 1) + ((emitter.sides >> 1) & 1);
+        // A surface may be in more than one group.
+        auto known = std::find_if(candidates.begin(),
+            candidates.end(),
+            [&](const Candidate &c) { return c.surface == surface; });
+        Candidate fresh{surface, false, {}, 0, 0, 0.f};
+        if (known == candidates.end() && material->fragment()
+            && !emitter.mapName.empty()) {
+          // The map is an object of the fragment, which the loop over the
+          // surfaces below would load; that one then finds it loaded.
+          syncFragment(material, *material->fragment());
+          ++loadedEarly;
+          const unsigned reads = emissionReads(material, emitter);
+          if ((reads & ReadsView) != 0)
+            continue; // no light has what this emission reads
+          fresh.perInstance = (reads & ReadsInstance) != 0;
+        }
+        Candidate &candidate = known != candidates.end() ? *known : fresh;
+        for (const Instance *instance : groupInstances[group]) {
+          const uint32_t lit = instance->visibility() & litBy;
+          if (lit == 0)
+            continue;
+          if (std::find(candidate.seenBy.begin(), candidate.seenBy.end(), lit)
+              == candidate.seenBy.end()) {
+            candidate.seenBy.push_back(lit);
+          }
+          ++candidate.instances;
+          candidate.triangles +=
+              size_t(sides) * surface->geometry()->triangleCount();
+          // The area grows with the square of a uniform scale.
+          const float scale = std::cbrt(
+              std::fabs(float(linalg::determinant(instance->xfm()))));
+          candidate.power += float(sides) * area * scale * scale
+              * (emitter.color.x + emitter.color.y + emitter.color.z);
+        }
+        if (known == candidates.end() && !fresh.seenBy.empty())
+          candidates.push_back(std::move(fresh));
+      }
+    }
+    // Each of them is counted once more as unchanged in the loop below.
+    m_objectsUnchanged -= loadedEarly;
+    std::stable_sort(candidates.begin(),
+        candidates.end(),
+        [](const Candidate &a, const Candidate &b) {
+          return a.power > b.power;
+        });
+    int lightsLeft = m_maxMeshLights;
+    size_t trianglesLeft = m_maxMeshLightTriangles;
+    for (const Candidate &candidate : candidates) {
+      const int lights = candidate.lights();
+      if (lights <= lightsLeft && candidate.triangles <= trianglesLeft) {
+        lightsLeft -= lights;
+        trianglesLeft -= candidate.triangles;
+        sampledSurfaces[candidate.surface] = candidate.perInstance;
+      } else {
+        m_meshLightsOverLimit += lights;
+      }
+    }
+  }
+  // One instance of a sampled surface, for the lights made after the loop.
+  struct EmitterInstance
+  {
+    const Surface *surface;
+    const Instance *instance;
+    const Geometry *geometry;
+    Material::Emitter emitter;
+    rdl2::SceneObject *emissionMap;
+    helium::TimeStamp materialVersion;
+  };
+  std::vector<EmitterInstance> emitterInstances;
+
   for (Group *group : groupOrder) {
     const auto &instances = groupInstances[group];
     const bool instanced = instances.size() > 1;
@@ -356,18 +1231,35 @@ void MoonrayScene::syncSurfaces(World *world,
       const Material *material = surface->material();
       const char *geometryClass = geometry->rdl2ClassName();
       const char *materialClass = material->rdl2ClassName();
+      // A material that brings its RDL2 objects along as text; everything
+      // below that builds a material out of ANARI parameters is skipped.
+      const Material::Fragment *fragment = material->fragment();
 
       // Samplers first: a textured parameter is an RDL2 binding to a Map
       // object, so the Map has to exist before the material is written.
       std::vector<std::pair<const char *, rdl2::SceneObject *>> bindings;
       bool write = false;
+      // The newest state of the material *and* of everything bound to it:
+      // what the material's own attributes hold depends on its samplers too
+      // (Sampler::attributeFactor(), and whether a sampler is usable at all).
+      helium::TimeStamp materialVersion = material->lastUpdated();
       for (const auto &binding : material->samplerBindings()) {
         Sampler *sampler = binding.sampler;
         if (!sampler || !sampler->isValid() || !binding.rdl2Attribute)
           continue;
+        materialVersion = newest(materialVersion, sampler->lastUpdated());
         const char *samplerClass = sampler->rdl2ClassName();
+        // One map per usage: a color, a scalar and a normal attribute take
+        // the sampler's value in different ways (SamplerUsage). The color
+        // map keeps the plain name.
+        const std::string samplerName =
+            objectName("sampler", samplerClass, sampler);
+        const char *usageSuffix =
+            binding.usage == SamplerUsage::Scalar
+                ? "/scalar"
+                : (binding.usage == SamplerUsage::Normal ? "/normal" : "");
         rdl2::SceneObject *mapObj = syncedObject(samplerClass,
-            objectName("sampler", samplerClass, sampler),
+            samplerName + usageSuffix,
             sampler->lastUpdated(),
             write);
         if (write) {
@@ -375,15 +1267,15 @@ void MoonrayScene::syncSurfaces(World *world,
           // surface's st gets it through an AttributeMap bound to the map's
           // input coordinates (Sampler::inputPrimitiveAttribute()). Written
           // first, like the geometry's UserData: it is a separate object the
-          // map only has to point at.
+          // map only has to point at, and one serves all usages.
           rdl2::SceneObject *inputObj = nullptr;
           if (const char *input = sampler->inputPrimitiveAttribute()) {
-            inputObj = createObject("AttributeMap",
-                objectName("sampler", samplerClass, sampler) + "/input");
+            inputObj = createObject("AttributeMap", samplerName + "/input");
             rdl2::SceneObject::UpdateGuard guard(inputObj);
             inputObj->set("map_type", 0); // primitive attribute
             inputObj->set("primitive_attribute_name", std::string(input));
-            inputObj->set("primitive_attribute_type", 1); // vec2f
+            inputObj->set("primitive_attribute_type",
+                sampler->inputPrimitiveAttributeType());
             // ImageMap reads a negative third component as "no coordinate"
             // and returns black; a geometry without the attribute samples the
             // start of the image instead.
@@ -391,9 +1283,11 @@ void MoonrayScene::syncSurfaces(World *world,
             inputObj->set("warn_when_unavailable", false);
           }
           rdl2::SceneObject::UpdateGuard guard(mapObj);
-          sampler->syncRdl2(*mapObj);
+          sampler->syncRdl2(*mapObj, binding.usage);
           if (inputObj)
             mapObj->setBinding("input_texture_coordinates", inputObj);
+          else if (mapObj->getSceneClass().getName() == "ImageMap")
+            mapObj->setBinding("input_texture_coordinates", nullptr);
         }
         bindings.emplace_back(binding.rdl2Attribute, mapObj);
       }
@@ -429,17 +1323,112 @@ void MoonrayScene::syncSurfaces(World *world,
       // A material whose bindings changed has itself changed - the binding is
       // written inside the material's own update - so the set of bound
       // attributes is part of what decides whether it must be rewritten.
-      rdl2::SceneObject *materialObj = syncedObject(materialClass,
-          objectName("material", materialClass, material),
-          material->lastUpdated(),
-          write);
-      if (write) {
-        rdl2::SceneObject::UpdateGuard guard(materialObj);
-        material->syncRdl2(*materialObj);
-        for (const auto &b : bindings)
-          materialObj->setBinding(b.first, b.second);
+      rdl2::Material *rdlMaterial = nullptr;
+      rdl2::SceneObject *materialObj = nullptr;
+      if (fragment) {
+        rdlMaterial = syncFragment(material, *fragment);
+        m_needPresenceShadows = m_needPresenceShadows
+            || m_fragments[material->syncId()].usesPresence;
+      } else {
+        materialObj = syncedObject(materialClass,
+            objectName("material", materialClass, material),
+            materialVersion,
+            write);
+        if (write) {
+          rdl2::SceneObject::UpdateGuard guard(materialObj);
+          material->syncRdl2(*materialObj);
+          // A parameter that had a sampler and now has a constant must lose
+          // its map: every binding that is not wanted any more is dropped.
+          const rdl2::SceneClass &sceneClass = materialObj->getSceneClass();
+          for (auto it = sceneClass.beginAttributes();
+              it != sceneClass.endAttributes();
+              ++it) {
+            const rdl2::Attribute *attribute = *it;
+            if (!attribute->isBindable() || !materialObj->getBinding(*attribute))
+              continue;
+            const bool wanted = std::any_of(bindings.begin(),
+                bindings.end(),
+                [&](const auto &b) { return attribute->getName() == b.first; });
+            if (!wanted)
+              materialObj->setBinding(*attribute, nullptr);
+          }
+          for (const auto &b : bindings)
+            materialObj->setBinding(b.first, b.second);
+        }
+        rdlMaterial = materialObj->asA<rdl2::Material>();
       }
-      auto *rdlMaterial = materialObj->asA<rdl2::Material>();
+
+      // --- an emitter the lights sample (Material::Emitter) ----------------
+      // The surface gets the variant of its material which emits for camera
+      // and mirror rays only: those are the rays the lights are not seen by.
+      // An `rdla` material brings the variant along; for a material that is
+      // one object it is that object for camera and mirror rays and a copy
+      // without the emission for the others, behind a RaySwitchMaterial.
+      Material::Emitter emitter;
+      rdl2::SceneObject *emissionMap = nullptr;
+      bool sampled = false;
+      if (sampledSurfaces.count(surface) != 0) {
+        emitter = material->emitter();
+        if (fragment) {
+          sampled = fragmentEmitter(material, emitter, rdlMaterial, emissionMap);
+        } else if (emitter.rdl2Attribute) {
+          const std::string baseName =
+              objectName("material", materialClass, material);
+          bool variantWrite = false;
+          rdl2::SceneObject *darkObj = syncedObject(materialClass,
+              baseName + "/noEmission",
+              materialVersion,
+              variantWrite);
+          if (variantWrite) {
+            rdl2::SceneObject::UpdateGuard guard(darkObj);
+            material->syncRdl2(*darkObj);
+            const rdl2::SceneClass &sceneClass = darkObj->getSceneClass();
+            for (auto it = sceneClass.beginAttributes();
+                it != sceneClass.endAttributes();
+                ++it) {
+              if ((*it)->isBindable() && darkObj->getBinding(**it))
+                darkObj->setBinding(**it, nullptr);
+            }
+            for (const auto &b : bindings) {
+              if (std::strcmp(b.first, emitter.rdl2Attribute) != 0)
+                darkObj->setBinding(b.first, b.second);
+            }
+            darkObj->set(emitter.rdl2Attribute, rdl2::Rgb(0.f, 0.f, 0.f));
+          }
+          bool switchWrite = false;
+          rdl2::SceneObject *switchObj = syncedObject("RaySwitchMaterial",
+              baseName + "/sampled",
+              materialVersion,
+              switchWrite);
+          if (switchWrite) {
+            rdl2::SceneObject::UpdateGuard guard(switchObj);
+            // Shadow rays take the default one: only its presence counts.
+            setObject(switchObj, "default_material", darkObj);
+            setObject(switchObj, "camera_ray_material", materialObj);
+            setObject(switchObj, "indirect_mirror_ray_material", materialObj);
+            setObject(switchObj, "indirect_glossy_ray_material", darkObj);
+            setObject(switchObj, "indirect_diffuse_ray_material", darkObj);
+          }
+          for (const auto &b : bindings) {
+            if (std::strcmp(b.first, emitter.rdl2Attribute) == 0)
+              emissionMap = b.second;
+          }
+          holdMaterial(materialObj);
+          holdMaterial(darkObj);
+          rdlMaterial = switchObj->asA<rdl2::Material>();
+          sampled = true;
+        }
+      }
+      const auto addEmitter = [&](const Instance *instance) {
+        if (sampled && (instance->visibility() & litBy) != 0) {
+          emitterInstances.push_back({surface,
+              instance,
+              geometry,
+              emitter,
+              emissionMap,
+              materialVersion});
+        }
+      };
 
       if (!instanced) {
         Instance *instance = instances.front();
@@ -451,15 +1440,54 @@ void MoonrayScene::syncSurfaces(World *world,
             write);
         if (write) {
           writeGeometry(geometry, geometryObj, geometryName);
+          appendObjectInfo({instance}, geometryObj, geometryName, false);
           rdl2::SceneObject::UpdateGuard guard(geometryObj);
           geometryObj->set("node_xform", toRdl2(instance->xfm()));
+          // A mirroring transform turns the winding of the triangles around,
+          // and the winding is what MoonRay takes the geometric normal from -
+          // which then points the other way than the (correctly transformed)
+          // vertex normals, and the surface renders black. An instancer
+          // handles this itself.
+          if (geometryObj->getSceneClass().getName() == "RdlMeshGeometry") {
+            geometryObj->set("orientation",
+                linalg::determinant(instance->xfm()) < 0.f ? 1 : 0);
+          }
         }
         auto *rdlGeometry = geometryObj->asA<rdl2::Geometry>();
         renderGeometries.push_back(rdlGeometry);
-        assignments.push_back(
-            {rdlGeometry, rdlMaterial, nullptr, false, geometryName});
+        // One instance, one RDL2 geometry: the instance's ray visibility is
+        // simply that geometry's.
+        assignments.push_back({rdlGeometry,
+            rdlMaterial,
+            nullptr,
+            false,
+            geometryName,
+            instance->visibility()});
+        addEmitter(instance);
         continue;
       }
+
+      // MoonRay takes the ray visibility of every instance from the
+      // *instancer* geometry (rt::EmbreeAccelerator: "we use the visibility
+      // flags of the instance geometry"), so instances of one group that
+      // differ in visibility cannot share an instancer: there is one per
+      // distinct visibility, all referencing the same prototype. Normally
+      // that is a single one. Instances no ray sees get none.
+      std::vector<std::pair<uint32_t, std::vector<Instance *>>> byVisibility;
+      for (auto *instance : instances) {
+        const uint32_t seenBy = instance->visibility();
+        if (seenBy == visibility::None)
+          continue;
+        auto same = std::find_if(byVisibility.begin(),
+            byVisibility.end(),
+            [&](const auto &entry) { return entry.first == seenBy; });
+        if (same == byVisibility.end())
+          byVisibility.push_back({seenBy, {instance}});
+        else
+          same->second.push_back(instance);
+      }
+      if (byVisibility.empty())
+        continue; // nothing to render; what was there is retired below
 
       // The instancer is decided first because the prototype has to follow it:
       // MoonRay regenerates a referenced geometry whenever its referrer
@@ -477,10 +1505,24 @@ void MoonrayScene::syncSurfaces(World *world,
       // compares values before marking an attribute changed, it says it only
       // by accident.
       bool instancerWrite = false;
-      rdl2::SceneObject *instancerObj = syncedObject("RdlInstancerGeometry",
-          objectName("instancer", "RdlInstancerGeometry", group, surface),
-          newest(geometry->lastUpdated(), instancesVersion),
-          instancerWrite);
+      std::vector<std::pair<rdl2::SceneObject *, bool>> instancers;
+      for (const auto &entry : byVisibility) {
+        // The instancer of the instances every ray sees keeps the plain
+        // name. The others are told apart by their visibility - with a
+        // separator that keeps them from being named *under* the plain one,
+        // which retireObject() would take as belonging to it.
+        std::string name =
+            objectName("instancer", "RdlInstancerGeometry", group, surface);
+        if (entry.first != visibility::All)
+          name += "@visibility" + std::to_string(entry.first);
+        bool thisWrite = false;
+        rdl2::SceneObject *obj = syncedObject("RdlInstancerGeometry",
+            name,
+            newest(geometry->lastUpdated(), instancesVersion),
+            thisWrite);
+        instancers.push_back({obj, thisWrite});
+        instancerWrite = instancerWrite || thisWrite;
+      }
 
       // The prototype is keyed by the *surface*, not by the geometry: the
       // layer assigns one material per geometry, so two surfaces sharing an
@@ -506,35 +1548,55 @@ void MoonrayScene::syncSurfaces(World *world,
       }
       auto *rdlPrototype = prototypeObj->asA<rdl2::Geometry>();
 
-      if (instancerWrite) {
-        rdl2::Mat4dVector xforms;
-        xforms.reserve(instances.size());
-        for (auto *instance : instances)
-          xforms.push_back(toRdl2(instance->xfm()));
+      for (size_t i = 0; i < byVisibility.size(); ++i) {
+        rdl2::SceneObject *instancerObj = instancers[i].first;
+        if (instancers[i].second) {
+          rdl2::Mat4dVector xforms;
+          xforms.reserve(byVisibility[i].second.size());
+          for (auto *instance : byVisibility[i].second)
+            xforms.push_back(toRdl2(instance->xfm()));
 
-        rdl2::SceneObjectVector references;
-        references.push_back(rdlPrototype);
+          rdl2::SceneObjectVector references;
+          references.push_back(rdlPrototype);
 
-        rdl2::SceneObject::UpdateGuard guard(instancerObj);
-        // 2 == "xform list": the per-instance transforms come from
-        // xform_list rather than from positions/orientations/scales.
-        instancerObj->set("method", 2);
-        instancerObj->set("xform_list", xforms);
-        // The prototype's node_xform is the identity above; not applying it
-        // keeps the ANARI instance transform the only transform in play.
-        instancerObj->set("use_reference_xforms", false);
-        instancerObj->set(rdl2::Geometry::sReferenceGeometries, references);
+          rdl2::SceneObject::UpdateGuard guard(instancerObj);
+          // 2 == "xform list": the per-instance transforms come from
+          // xform_list rather than from positions/orientations/scales.
+          instancerObj->set("method", 2);
+          instancerObj->set("xform_list", xforms);
+          // The prototype's node_xform is the identity above; not applying
+          // it keeps the ANARI instance transform the only transform in play.
+          instancerObj->set("use_reference_xforms", false);
+          instancerObj->set(rdl2::Geometry::sReferenceGeometries, references);
+          instancerObj->set(
+              "primitive_attributes", rdl2::SceneObjectVector());
+        }
+        if (instancers[i].second) {
+          appendObjectInfo(byVisibility[i].second,
+              instancerObj,
+              instancerObj->getName(),
+              true);
+        }
+        auto *rdlInstancer = instancerObj->asA<rdl2::Geometry>();
+        for (const Instance *instance : byVisibility[i].second)
+          addEmitter(instance);
+
+        renderGeometries.push_back(rdlInstancer);
+        assignments.push_back({rdlInstancer,
+            rdlMaterial,
+            nullptr,
+            false,
+            instancerObj->getName(),
+            byVisibility[i].first});
       }
-      auto *rdlInstancer = instancerObj->asA<rdl2::Geometry>();
-
-      renderGeometries.push_back(rdlInstancer);
-      assignments.push_back({rdlInstancer,
+      // The prototype itself stays visible to everything: what a ray may hit
+      // is decided at the instancer it came through.
+      assignments.push_back({rdlPrototype,
           rdlMaterial,
           nullptr,
           false,
-          instancerObj->getName()});
-      assignments.push_back(
-          {rdlPrototype, rdlMaterial, nullptr, false, prototypeName});
+          prototypeName,
+          visibility::All});
     }
 
     // --- volumes ----------------------------------------------------------
@@ -593,9 +1655,321 @@ void MoonrayScene::syncSurfaces(World *world,
             nullptr,
             shaderObj->asA<rdl2::VolumeShader>(),
             false,
-            geometryObj->getName()});
+            geometryObj->getName(),
+            instance->visibility()});
       }
     }
+  }
+
+  // --- the lights of the emitters -----------------------------------------
+  // A MeshLight takes its shape from a geometry which is in no layer of the
+  // scene (RenderContext::createMeshLightLayer() refuses one that is), and it
+  // emits from the front of its faces only. The light of a surface therefore
+  // sits on a mesh of its own: the triangles of every instance, once for each
+  // sampled side, the back side with its winding turned around. One light
+  // for all of them rather than one each, because a mesh light is not cheap -
+  // every sampled direction is intersected with every one of them.
+  //
+  // The mesh of several instances is in world space. One instance keeps its
+  // transform, so that the map of its emission finds the space of the object
+  // where the surface has it; that is the only form when the map reads it.
+  //
+  // MoonRay loads such geometry through a layer of its own, "MeshLightLayer",
+  // which it fills from the lights of the *first* frame only. The device
+  // keeps that layer itself, the way MoonRay does: the geometry is assigned a
+  // material named after it, whose albedo is bound to the light's map so
+  // that the geometry is built with the primitive attributes the map reads.
+  m_meshLights.clear();
+  for (auto &entry : m_emitterLights)
+    entry.second.live = false;
+  if (!emitterInstances.empty()) {
+    struct LightInput
+    {
+      const Surface *surface;
+      uint32_t seenBy;
+      // Which of the lights of the surface for these rays, when every
+      // instance is one; -1 for the light of all instances.
+      int ordinal;
+      std::vector<const EmitterInstance *> instances;
+    };
+    std::vector<LightInput> inputs;
+    for (const EmitterInstance &e : emitterInstances) {
+      const uint32_t seenBy = e.instance->visibility() & litBy;
+      const bool perInstance = sampledSurfaces[e.surface];
+      int ordinal = perInstance ? 0 : -1;
+      LightInput *same = nullptr;
+      for (LightInput &input : inputs) {
+        if (input.surface != e.surface || input.seenBy != seenBy)
+          continue;
+        if (perInstance)
+          ++ordinal;
+        else
+          same = &input;
+      }
+      if (same)
+        same->instances.push_back(&e);
+      else
+        inputs.push_back({e.surface, seenBy, ordinal, {&e}});
+    }
+
+    auto *meshLightLayer =
+        createObject("Layer", "MeshLightLayer")->asA<rdl2::Layer>();
+    auto *meshLightSet =
+        createObject("LightSet", "MeshLightLightSet")->asA<rdl2::LightSet>();
+    for (const LightInput &input : inputs) {
+      const EmitterInstance &first = *input.instances.front();
+      const Geometry *geometry = first.geometry;
+      const Material::Emitter &emitter = first.emitter;
+      // By the surface and not by the instance: an application which makes
+      // its instances anew for every edit gets the same objects again.
+      std::string suffix = "@" + std::to_string(input.seenBy);
+      if (input.ordinal >= 0)
+        suffix += "#" + std::to_string(input.ordinal);
+      const std::string geometryName =
+          objectName("emitter", "RdlMeshGeometry", input.surface) + suffix;
+      const std::string lightName =
+          objectName("meshLight", "MeshLight", input.surface) + suffix;
+
+      helium::TimeStamp geometryVersion = geometry->lastUpdated();
+      std::vector<uint64_t> signature;
+      signature.push_back(uint64_t(emitter.sides));
+      for (const EmitterInstance *e : input.instances) {
+        geometryVersion = newest(geometryVersion, e->instance->lastUpdated());
+        signature.push_back(e->instance->syncId());
+      }
+      EmitterLight &slot = m_emitterLights[geometryName];
+      const bool isNew = slot.lightName.empty();
+      const bool sameInstances = slot.signature == signature;
+      slot.lightName = lightName;
+      slot.signature = std::move(signature);
+      slot.live = true;
+
+      bool geometryWrite = false;
+      rdl2::SceneObject *geometryObj = syncedObject("RdlMeshGeometry",
+          geometryName,
+          geometryVersion,
+          geometryWrite,
+          /*force=*/!sameInstances);
+      if (geometryWrite) {
+        // The geometry as it is, for its texture coordinates and its other
+        // primitive attributes; then the vertices and faces of all copies.
+        writeGeometry(geometry, geometryObj, geometryName);
+        const bool local = input.instances.size() == 1;
+        if (local) {
+          appendObjectInfo({const_cast<Instance *>(first.instance)},
+              geometryObj,
+              geometryName,
+              false);
+        }
+        const rdl2::IntVector baseIndices =
+            geometryObj->get<rdl2::IntVector>("vertices_by_index");
+        const size_t numVertices =
+            geometryObj->get<rdl2::Vec3fVector>("vertex_list_0").size();
+        // What an earlier write of the copies left there has another size.
+        rdl2::Vec2fVector baseUvs =
+            geometryObj->get<rdl2::Vec2fVector>("uv_list");
+        if (baseUvs.size() != numVertices)
+          baseUvs.clear();
+
+        rdl2::Vec3fVector vertices;
+        rdl2::IntVector indices;
+        rdl2::Vec2fVector uvs;
+        size_t copies = 0;
+        std::vector<float> moved;
+        for (const EmitterInstance *e : input.instances) {
+          const mat4 &xfm = e->instance->xfm();
+          const bool mirrored = linalg::determinant(xfm) < 0.f;
+          // Each copy is moved off the surface by a hair, to the side it
+          // emits to. On the surface itself, a ray which leaves the surface
+          // to one side starts within rounding of the copy of the other
+          // side, and half of such rays would hit that copy from the front
+          // at distance zero: the surface would reflect its own emission.
+          // Moved, each copy is behind the rays which leave to the other
+          // side, and those which leave to its own side meet its back, which
+          // emits nothing. The distance is far below what could be seen, and
+          // above the rounding of positions as far out as the object is.
+          const float radius = geometry->boundingRadius();
+          const float scale =
+              std::cbrt(std::fabs(float(linalg::determinant(xfm))));
+          const float reach = std::fabs(xfm[3].x) + std::fabs(xfm[3].y)
+              + std::fabs(xfm[3].z) + scale * radius;
+          const float distance = 1e-4f * radius
+              + (scale > 0.f ? 4e-6f * reach / scale : 0.f);
+          for (int side = 0; side < 2; ++side) {
+            if ((emitter.sides & (1 << side)) == 0)
+              continue;
+            if (!geometry->displacedPositions(
+                    side == 0 ? distance : -distance, moved)
+                || moved.size() != 3 * numVertices) {
+              continue;
+            }
+            for (size_t i = 0; i < numVertices; ++i) {
+              if (local) {
+                vertices.emplace_back(
+                    moved[3 * i], moved[3 * i + 1], moved[3 * i + 2]);
+              } else {
+                const float4 p = xfm[0] * moved[3 * i]
+                    + xfm[1] * moved[3 * i + 1] + xfm[2] * moved[3 * i + 2]
+                    + xfm[3];
+                vertices.emplace_back(p.x, p.y, p.z);
+              }
+            }
+            // The front of a face is where its winding says, in world space:
+            // the other way around for the back side, and for a transform
+            // which mirrors.
+            const int offset = int(copies * numVertices);
+            const bool reversed = (side == 1) != mirrored;
+            for (size_t i = 0; i + 2 < baseIndices.size(); i += 3) {
+              indices.push_back(offset + baseIndices[i]);
+              indices.push_back(offset + baseIndices[i + (reversed ? 2 : 1)]);
+              indices.push_back(offset + baseIndices[i + (reversed ? 1 : 2)]);
+            }
+            uvs.insert(uvs.end(), baseUvs.begin(), baseUvs.end());
+            ++copies;
+          }
+        }
+
+        {
+          rdl2::SceneObject::UpdateGuard guard(geometryObj);
+          geometryObj->set("vertex_list_0", vertices);
+          geometryObj->set("vertices_by_index", indices);
+          geometryObj->set(
+              "face_vertex_count", rdl2::IntVector(indices.size() / 3, 3));
+          geometryObj->set("uv_list", uvs);
+          // The light has no use for shading normals.
+          geometryObj->set("normal_list", rdl2::Vec3fVector());
+          geometryObj->set("node_xform",
+              local ? toRdl2(first.instance->xfm())
+                    : rdl2::Mat4d(rdl2::Vec4d(1, 0, 0, 0),
+                          rdl2::Vec4d(0, 1, 0, 0),
+                          rdl2::Vec4d(0, 0, 1, 0),
+                          rdl2::Vec4d(0, 0, 0, 1)));
+          geometryObj->set("orientation", 0);
+        }
+        // The per-vertex attributes, once for each copy.
+        const auto repeat = [&](rdl2::SceneObject *data, const char *name,
+                                auto values) {
+          if (values.size() != numVertices || copies < 2)
+            return;
+          const auto once = values;
+          for (size_t copy = 1; copy < copies; ++copy)
+            values.insert(values.end(), once.begin(), once.end());
+          rdl2::SceneObject::UpdateGuard guard(data);
+          data->set(name, values);
+        };
+        for (rdl2::SceneObject *data :
+            geometryObj->get<rdl2::SceneObjectVector>("primitive_attributes")) {
+          if (!data || data->get<rdl2::Int>("rate") != 4)
+            continue;
+          repeat(data, "float_values_0",
+              data->get<rdl2::FloatVector>("float_values_0"));
+          repeat(data, "vec2f_values_0",
+              data->get<rdl2::Vec2fVector>("vec2f_values_0"));
+          repeat(data, "vec3f_values_0",
+              data->get<rdl2::Vec3fVector>("vec3f_values_0"));
+          repeat(data, "color_values_0",
+              data->get<rdl2::RgbVector>("color_values_0"));
+        }
+      }
+
+      // The name is the one MoonRay looks the material up by.
+      rdl2::SceneObject *holderObj =
+          createObject("DwaBaseMaterial", geometryName + "_MeshLightMaterial");
+      const rdl2::Attribute *albedo =
+          holderObj->getSceneClass().getAttribute("albedo");
+      if (holderObj->getBinding(*albedo) != first.emissionMap) {
+        rdl2::SceneObject::UpdateGuard guard(holderObj);
+        holderObj->setBinding("albedo", first.emissionMap);
+      }
+      if (isNew) {
+        rdl2::SceneObject::UpdateGuard guard(meshLightLayer);
+        meshLightLayer->assign(geometryObj->asA<rdl2::Geometry>(),
+            "",
+            holderObj->asA<rdl2::Material>(),
+            meshLightSet,
+            /*displacement=*/nullptr,
+            /*volumeShader=*/nullptr);
+      }
+
+      bool lightWrite = false;
+      rdl2::SceneObject *lightObj = syncedObject("MeshLight",
+          lightName,
+          newest(geometryVersion, first.materialVersion),
+          lightWrite,
+          /*force=*/geometryWrite);
+      if (lightWrite) {
+        const float strength = std::max(
+            emitter.color.x, std::max(emitter.color.y, emitter.color.z));
+        rdl2::SceneObject::UpdateGuard guard(lightObj);
+        setObject(lightObj, "geometry", geometryObj);
+        setObject(lightObj, "map_shader", first.emissionMap);
+        // normalized = false makes color * intensity the radiance.
+        lightObj->set("normalized", false);
+        lightObj->set("color",
+            strength > 0.f ? rdl2::Rgb(emitter.color.x / strength,
+                                 emitter.color.y / strength,
+                                 emitter.color.z / strength)
+                           : rdl2::Rgb(0.f, 0.f, 0.f));
+        lightObj->set("intensity", strength);
+        lightObj->set("exposure", 0.f);
+        // The camera and the mirrors see the surface itself.
+        lightObj->set("visible_in_camera", 0);
+        lightObj->set("visible_mirror_reflection", false);
+        lightObj->set("visible_mirror_transmission", false);
+        lightObj->set("visible_diffuse_reflection",
+            (input.seenBy & visibility::DiffuseReflection) != 0);
+        lightObj->set("visible_diffuse_transmission",
+            (input.seenBy & visibility::DiffuseTransmission) != 0);
+        lightObj->set("visible_glossy_reflection",
+            (input.seenBy & visibility::GlossyReflection) != 0);
+        lightObj->set("visible_glossy_transmission",
+            (input.seenBy & visibility::GlossyTransmission) != 0);
+      }
+      m_meshLights.push_back(lightObj->asA<rdl2::Light>());
+    }
+  }
+  // An emitter that is gone gives its mesh back. Its assignment in the mesh
+  // light layer stays, like one of the scene's layer.
+  for (auto &entry : m_emitterLights) {
+    if (!entry.second.live && m_objects.count(entry.first) != 0) {
+      retireObject(entry.first);
+      retireObject(entry.second.lightName);
+      entry.second.signature.clear();
+    }
+  }
+  // MoonRay only tessellates geometry which is in a geometry set - and a mesh
+  // light with a map reads the texture coordinates and the other primitive
+  // attributes of the tessellated mesh. The meshes of the lights get a set of
+  // their own: the one of the scene is what the layer's geometry is.
+  if (!m_emitterLights.empty()) {
+    std::vector<rdl2::Geometry *> copies;
+    for (const auto &entry : m_emitterLights) {
+      if (entry.second.live)
+        copies.push_back(m_objects[entry.first].object->asA<rdl2::Geometry>());
+    }
+    auto *emitterSet =
+        createObject("GeometrySet", "/anari/emitterGeometrySet")
+            ->asA<rdl2::GeometrySet>();
+    const auto &current = emitterSet->getGeometries();
+    bool same = current.size() == copies.size();
+    for (size_t i = 0; same && i < copies.size(); ++i)
+      same = emitterSet->contains(copies[i]);
+    if (!same) {
+      rdl2::SceneObject::UpdateGuard guard(emitterSet);
+      emitterSet->clear();
+      for (auto *copy : copies)
+        emitterSet->add(copy);
+    }
+  }
+  if (std::getenv("OPENMOONRAY_ANARI_DEBUG_LAYER")) {
+    std::fprintf(stderr,
+        "[moonray] sync: %zu mesh light(s) for %zu emitter instance(s), %d "
+        "over the limit of %d, %zu emitter geometr(ies) ever\n",
+        m_meshLights.size(),
+        emitterInstances.size(),
+        m_meshLightsOverLimit,
+        m_maxMeshLights,
+        m_emitterLights.size());
   }
 
   // --- the layer never shrinks --------------------------------------------
@@ -617,43 +1991,70 @@ void MoonrayScene::syncSurfaces(World *world,
     auto it = std::find_if(m_layerAssignments.begin(),
         m_layerAssignments.end(),
         [&](const LayerAssignment &s) { return s.geometry == a.geometry; });
-    if (it == m_layerAssignments.end())
+    if (it == m_layerAssignments.end()) {
       m_layerAssignments.push_back(a);
-    else
-      *it = a; // the same geometry, possibly with a different shader
+    } else {
+      // The same geometry, possibly with a different shader or visibility.
+      // Whether the slot is retired and what its RDL2 object currently holds
+      // is the slot's own knowledge and stays.
+      it->material = a.material;
+      it->volumeShader = a.volumeShader;
+      it->name = a.name;
+      it->visibility = a.visibility;
+    }
   }
 
   for (auto &slot : m_layerAssignments) {
     const bool live = std::any_of(assignments.begin(),
         assignments.end(),
         [&](const LayerAssignment &a) { return a.geometry == slot.geometry; });
-    if (live == !slot.retired)
-      continue; // already in the state it should be in
 
-    slot.retired = !live;
+    if (live == slot.retired) {
+      slot.retired = !live;
 
-    // A retired geometry gives its data back: RDL2 cannot delete the object,
-    // but resetting it to its defaults releases the vertex arrays it is
-    // holding (and the UserData objects named after it, which carry the
-    // primitive attributes). Dropping the cache entries with them is what
-    // makes this reversible - a geometry that comes back is then written from
-    // scratch instead of being trusted to still hold its data.
-    if (!live)
-      retireObject(slot.name);
+      // A retired geometry gives its data back: RDL2 cannot delete the
+      // object, but resetting it to its defaults releases the vertex arrays
+      // it is holding (and the UserData objects named after it, which carry
+      // the primitive attributes). Dropping the cache entries with them is
+      // what makes this reversible - a geometry that comes back is then
+      // written from scratch instead of being trusted to still hold its data.
+      if (!live) {
+        retireObject(slot.name);
+        // The reset made it visible to everything again.
+        slot.appliedVisibility = visibility::All;
+      }
+    }
+
+    // In the scene the geometry is seen by the rays its instance says; out of
+    // it, by none. Only a difference is written: MoonRay rebuilds a geometry
+    // whose visibility attributes changed.
+    const uint32_t wanted = live ? slot.visibility : visibility::None;
+    if (slot.appliedVisibility == wanted)
+      continue;
+    slot.appliedVisibility = wanted;
 
     // The keys rather than the attribute names: these are declared on RDL2's
     // Geometry base class, so every geometry has them, and the names are not
     // always what the key is called (sVisiblePhase is "visible_volume").
     rdl2::SceneObject::UpdateGuard guard(slot.geometry);
-    slot.geometry->set(rdl2::Geometry::sVisibleCamera, live);
-    slot.geometry->set(rdl2::Geometry::sVisibleShadow, live);
-    slot.geometry->set(rdl2::Geometry::sVisibleDiffuseReflection, live);
-    slot.geometry->set(rdl2::Geometry::sVisibleDiffuseTransmission, live);
-    slot.geometry->set(rdl2::Geometry::sVisibleGlossyReflection, live);
-    slot.geometry->set(rdl2::Geometry::sVisibleGlossyTransmission, live);
-    slot.geometry->set(rdl2::Geometry::sVisibleMirrorReflection, live);
-    slot.geometry->set(rdl2::Geometry::sVisibleMirrorTransmission, live);
-    slot.geometry->set(rdl2::Geometry::sVisiblePhase, live);
+    slot.geometry->set(
+        rdl2::Geometry::sVisibleCamera, (wanted & visibility::Camera) != 0);
+    slot.geometry->set(
+        rdl2::Geometry::sVisibleShadow, (wanted & visibility::Shadow) != 0);
+    slot.geometry->set(rdl2::Geometry::sVisibleDiffuseReflection,
+        (wanted & visibility::DiffuseReflection) != 0);
+    slot.geometry->set(rdl2::Geometry::sVisibleDiffuseTransmission,
+        (wanted & visibility::DiffuseTransmission) != 0);
+    slot.geometry->set(rdl2::Geometry::sVisibleGlossyReflection,
+        (wanted & visibility::GlossyReflection) != 0);
+    slot.geometry->set(rdl2::Geometry::sVisibleGlossyTransmission,
+        (wanted & visibility::GlossyTransmission) != 0);
+    slot.geometry->set(rdl2::Geometry::sVisibleMirrorReflection,
+        (wanted & visibility::MirrorReflection) != 0);
+    slot.geometry->set(rdl2::Geometry::sVisibleMirrorTransmission,
+        (wanted & visibility::MirrorTransmission) != 0);
+    slot.geometry->set(
+        rdl2::Geometry::sVisiblePhase, (wanted & visibility::Phase) != 0);
   }
 
   // --- containers ---------------------------------------------------------
@@ -803,8 +2204,70 @@ void MoonrayScene::syncScene(World *world,
           newest(light->lastUpdated(), instance->lastUpdated()),
           write);
       if (write) {
+        // An emission which changes with the distance is a filter of the
+        // light: a ramp over the distance between the point of the light
+        // which emits and the point which is lit, which is what MoonRay's
+        // radial ColorRampLightFilter takes when it has no transform of its
+        // own. Not for a light at infinity.
+        rdl2::SceneObjectVector filters;
+        const std::vector<float> &distances = light->falloffDistances();
+        const bool local = std::strcmp(lightClass, "DistantLight") != 0
+            && std::strcmp(lightClass, "EnvLight") != 0;
+        if (local && distances.size() >= 2 && distances.back() > 0.f) {
+          rdl2::SceneObject *filterObj = createObject("ColorRampLightFilter",
+              objectName("lightFalloff", "ColorRampLightFilter", instance, light));
+          // A ramp of MoonRay has ten control points at most. Of a longer
+          // table the points go which a line between their neighbours
+          // misses least, one after the other.
+          std::vector<float> kept = distances;
+          std::vector<float3> colors = light->falloffColors();
+          while (kept.size() > 10) {
+            size_t least = 1;
+            float leastError = std::numeric_limits<float>::max();
+            for (size_t i = 1; i + 1 < kept.size(); ++i) {
+              const float t =
+                  (kept[i] - kept[i - 1]) / (kept[i + 1] - kept[i - 1]);
+              const float3 line = colors[i - 1] + (colors[i + 1] - colors[i - 1]) * t;
+              const float3 miss = linalg::abs(colors[i] - line);
+              const float error = std::max(miss.x, std::max(miss.y, miss.z));
+              if (error < leastError) {
+                leastError = error;
+                least = i;
+              }
+            }
+            kept.erase(kept.begin() + least);
+            colors.erase(colors.begin() + least);
+          }
+          // The filter has its distances as fractions of a range.
+          const float end = kept.back();
+          rdl2::FloatVector positions;
+          rdl2::RgbVector values;
+          for (size_t i = 0; i < kept.size(); ++i) {
+            positions.push_back(kept[i] / end);
+            values.emplace_back(colors[i].x, colors[i].y, colors[i].z);
+          }
+          if (std::getenv("OPENMOONRAY_ANARI_DEBUG_LAYER")) {
+            std::fprintf(stderr, "[moonray] sync: falloff of %s:", lightClass);
+            for (size_t i = 0; i < kept.size(); ++i)
+              std::fprintf(stderr, " %g:%g", kept[i], colors[i].x);
+            std::fprintf(stderr, "\n");
+          }
+          rdl2::SceneObject::UpdateGuard guard(filterObj);
+          filterObj->set("mode", 0); // radial
+          filterObj->set("use_xform", false);
+          filterObj->set("begin_distance", 0.f);
+          filterObj->set("end_distance", end);
+          filterObj->set("distances", positions);
+          filterObj->set("colors", values);
+          filterObj->set("interpolation_types",
+              rdl2::IntVector(positions.size(), 1)); // linear
+          filterObj->set("intensity", 1.f);
+          filterObj->set("density", 1.f);
+          filters.push_back(filterObj);
+        }
         rdl2::SceneObject::UpdateGuard guard(lightObj);
         light->syncRdl2(*lightObj, instance->xfm());
+        lightObj->set("light_filters", filters);
       }
       lights.push_back(lightObj->asA<rdl2::Light>());
     }
@@ -812,6 +2275,20 @@ void MoonrayScene::syncScene(World *world,
 
   rdl2::LightSet *lightSet =
       createObject("LightSet", "/anari/lightSet")->asA<rdl2::LightSet>();
+
+  // --- surfaces: geometry + material + layer assignment -------------------
+  rdl2::SceneObject *geometrySet =
+      createObject("GeometrySet", "/anari/geometrySet");
+  rdl2::SceneObject *layer = createObject("Layer", "/anari/layer");
+
+  m_maxMeshLights = renderer->maxMeshLights() >= 0 ? renderer->maxMeshLights()
+                                                   : m_deviceMaxMeshLights;
+  m_maxMeshLightTriangles = size_t(renderer->maxMeshLightTriangles());
+  syncSurfaces(world, lightSet, geometrySet, layer);
+
+  // The lights of the emitting surfaces, which the surfaces brought along.
+  lights.insert(lights.end(), m_meshLights.begin(), m_meshLights.end());
+
   bool lightsChanged = false;
   {
     // The LightSet is membership only, and a light set that already holds
@@ -833,13 +2310,6 @@ void MoonrayScene::syncScene(World *world,
         lightSet->add(l);
     }
   }
-
-  // --- surfaces: geometry + material + layer assignment -------------------
-  rdl2::SceneObject *geometrySet =
-      createObject("GeometrySet", "/anari/geometrySet");
-  rdl2::SceneObject *layer = createObject("Layer", "/anari/layer");
-
-  syncSurfaces(world, lightSet, geometrySet, layer);
 
   // --- depth render output ------------------------------------------------
   // MoonRay produces anything beyond beauty through RenderOutput objects, and
@@ -876,8 +2346,23 @@ void MoonrayScene::syncScene(World *world,
   // parameters - pixelSamples, the sample splitting - change the render
   // without writing an object; they only change the noise, so they do not
   // need to be told apart from a repeat.)
+  // --- presence shadows ---------------------------------------------------
+  // A light reads the scene's enable_presence_shadows when it is updated, so
+  // switching it means telling the lights.
+  bool integratorChanged = false;
+  if (m_needPresenceShadows != m_presenceShadows) {
+    m_presenceShadows = m_needPresenceShadows;
+    for (auto *l : lights)
+      l->requestUpdate();
+    integratorChanged = true;
+  }
+  if (!(renderer->integrator() == m_integrator)) {
+    m_integrator = renderer->integrator();
+    integratorChanged = true;
+  }
+
   m_sceneChanged = !m_hasRendered || m_objectsUpdated > 0 || m_layerRebuilt
-      || lightsChanged || cameraObj != m_lastCamera;
+      || lightsChanged || integratorChanged || cameraObj != m_lastCamera;
   m_lastCamera = cameraObj;
   m_hasRendered = true;
   if (accumulate && !m_sceneChanged)
@@ -903,6 +2388,24 @@ void MoonrayScene::syncScene(World *world,
     vars.set(rdl2::SceneVariables::sBsdfSamplesSqrt, renderer->bsdfSamples());
     vars.set(rdl2::SceneVariables::sVolumeIlluminationSamples,
         lightSamples * lightSamples);
+    // Path depths and sample clamping (Renderer::commitParameters()), and
+    // whether shadow rays evaluate the presence of what they pass.
+    vars.set(rdl2::SceneVariables::sMaxDepth, m_integrator.maxDepth);
+    vars.set(
+        rdl2::SceneVariables::sMaxDiffuseDepth, m_integrator.maxDiffuseDepth);
+    vars.set(
+        rdl2::SceneVariables::sMaxGlossyDepth, m_integrator.maxGlossyDepth);
+    vars.set(
+        rdl2::SceneVariables::sMaxMirrorDepth, m_integrator.maxMirrorDepth);
+    vars.set(
+        rdl2::SceneVariables::sMaxVolumeDepth, m_integrator.maxVolumeDepth);
+    vars.set(rdl2::SceneVariables::sMaxPresenceDepth,
+        m_integrator.maxPresenceDepth);
+    vars.set(rdl2::SceneVariables::sSampleClampingValue,
+        m_integrator.sampleClampingValue);
+    vars.set(rdl2::SceneVariables::sSampleClampingDepth,
+        m_integrator.sampleClampingDepth);
+    vars.set(rdl2::SceneVariables::sEnablePresenceShadows, m_presenceShadows);
     // No ANARI object in this milestone carries motion samples, and shutter
     // time sampling would only add noise.
     vars.set(rdl2::SceneVariables::sEnableMotionBlur, false);

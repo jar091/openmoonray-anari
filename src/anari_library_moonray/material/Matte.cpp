@@ -3,6 +3,9 @@
 
 #include "Matte.h"
 
+// std
+#include <mutex>
+
 // scene_rdl2
 #include <scene_rdl2/scene/rdl2/SceneObject.h>
 #include <scene_rdl2/scene/rdl2/Types.h>
@@ -16,11 +19,9 @@ void Matte::commitParameters()
   m_colorSampler = getParamObject<Sampler>("color");
   m_colorAttribute.clear();
   if (m_colorSampler) {
-    // MoonRay *multiplies* a bound map by the attribute's own value
-    // (shading::evalColor), and skips the map entirely when the attribute is
-    // black. ANARI's semantics are that the sampler *is* the value, so a
-    // textured attribute gets the identity - white - written into it.
-    m_color = float3(1.f, 1.f, 1.f);
+    // The constant is not used; what the attribute holds while the sampler's
+    // map is bound to it is decided in syncRdl2().
+    m_color = float3(0.8f, 0.8f, 0.8f);
   } else if (hasParam("color", ANARI_STRING)) {
     const std::string attribute = getParamString("color", "");
     if (attribute == "color") {
@@ -46,11 +47,14 @@ void Matte::commitParameters()
     m_color = float3(0.8f, 0.8f, 0.8f);
   }
 
-  if (hasParam("opacity")
+  m_opacitySampler = getParamObject<Sampler>("opacity");
+  if (m_opacitySampler) {
+    m_opacity = 1.f;
+  } else if (hasParam("opacity")
       && !getParam("opacity", ANARI_FLOAT32, &m_opacity)) {
     reportMessage(ANARI_SEVERITY_WARNING,
-        "sampler- and attribute-valued 'opacity' are not supported by the "
-        "matte material yet - using the constant default");
+        "attribute-valued 'opacity' is not supported by the matte material - "
+        "using the constant default");
     m_opacity = 1.f;
   } else if (!hasParam("opacity")) {
     m_opacity = 1.f;
@@ -65,6 +69,24 @@ void Matte::commitParameters()
         "unknown 'alphaMode' \"%s\" on matte material - treating as opaque",
         m_alphaMode.c_str());
     m_alphaMode = "opaque";
+  }
+}
+
+void Matte::finalize()
+{
+  reportUnusable("color", m_colorSampler, SamplerUsage::Color);
+  reportUnusable("opacity", m_opacitySampler, SamplerUsage::Scalar);
+
+  if (m_alphaMode == "blend"
+      && usable(m_opacitySampler, SamplerUsage::Scalar)) {
+    // Once per process: it applies to every such material.
+    static std::once_flag blendOnce;
+    std::call_once(blendOnce, [this] {
+      reportMessage(ANARI_SEVERITY_WARNING,
+          "a sampler-valued 'opacity' with alphaMode \"blend\" is rendered as "
+          "a cutout at 0.5: MoonRay's UsdPreviewSurface is either present or "
+          "not at a point, it has no partial presence");
+    });
   }
 }
 
@@ -86,12 +108,30 @@ void Matte::syncRdl2(scene_rdl2::rdl2::SceneObject &obj) const
   // "opaque" ignores it, "mask" makes it a binary cutoff at alphaCutoff, and
   // "blend" passes it through.
   float opacity = 1.f;
-  if (m_alphaMode == "mask")
+  float opacityThreshold = 0.f;
+  if (Sampler *s = m_alphaMode != "opaque"
+          ? usable(m_opacitySampler, SamplerUsage::Scalar)
+          : nullptr) {
+    // From a map the opacity is a cutout: present where the map's value
+    // reaches the threshold (see PhysicallyBased::syncRdl2()).
+    opacity = s->attributeFactor(SamplerUsage::Scalar).x;
+    opacityThreshold = m_alphaMode == "mask" ? m_alphaCutoff : 0.5f;
+  } else if (m_alphaMode == "mask") {
     opacity = m_opacity >= m_alphaCutoff ? 1.f : 0.f;
-  else if (m_alphaMode == "blend")
+  } else if (m_alphaMode == "blend") {
     opacity = m_opacity;
+  }
 
-  obj.set("diffuseColor", Rgb(m_color.x, m_color.y, m_color.z));
+  // MoonRay *multiplies* a bound map by the attribute's own value
+  // (shading::evalColor), and skips the map entirely when the attribute is
+  // black. ANARI's semantics are that the sampler *is* the value, so an
+  // attribute with a map bound to it holds the identity - or the scale a
+  // `transform` sampler leaves to it (Sampler::attributeFactor()).
+  float3 color = m_color;
+  if (Sampler *s = usable(m_colorSampler, SamplerUsage::Color))
+    color = s->attributeFactor(SamplerUsage::Color);
+
+  obj.set("diffuseColor", Rgb(color.x, color.y, color.z));
   obj.set("emissiveColor", Rgb(0.f, 0.f, 0.f));
   obj.set("useSpecularWorkflow", 0);
   obj.set("metallic", 0.f);
@@ -101,16 +141,27 @@ void Matte::syncRdl2(scene_rdl2::rdl2::SceneObject &obj) const
   // Lambertian diffuse lobe alone - which is what ANARI 'matte' is.
   obj.set("ior", 1.f);
   obj.set("opacity", opacity);
-  obj.set("opacityThreshold", 0.f);
+  obj.set("opacityThreshold", opacityThreshold);
   obj.set("occlusion", 1.f);
   obj.set("displacement", 0.f);
 }
 
 std::vector<Material::SamplerBinding> Matte::samplerBindings() const
 {
-  if (m_colorSampler && m_colorSampler->isValid())
-    return {{"diffuseColor", m_colorSampler.ptr}};
-  return {};
+  std::vector<SamplerBinding> bindings;
+  if (Sampler *s = usable(m_colorSampler, SamplerUsage::Color))
+    bindings.push_back({"diffuseColor", s, SamplerUsage::Color});
+  if (m_alphaMode != "opaque") {
+    if (Sampler *s = usable(m_opacitySampler, SamplerUsage::Scalar))
+      bindings.push_back({"opacity", s, SamplerUsage::Scalar});
+  }
+  return bindings;
+}
+
+bool Matte::usesPresence() const
+{
+  return m_alphaMode != "opaque"
+      && usable(m_opacitySampler, SamplerUsage::Scalar) != nullptr;
 }
 
 std::vector<Material::AttributeBinding> Matte::attributeBindings() const

@@ -101,6 +101,11 @@ installing into the same `external/installs/openmoonray` prefix as scene_rdl2
 (30 DLLs, 9 executables, 68 shader DSOs + proxies). The port is documented
 change by change in docs/WINDOWS_PORT.md.
 
+`-Target moonshine` builds the shader library (the Dwa materials and the
+pattern maps) and `-Target anari_dso` the shaders of this repository (`dso/`,
+see SUPPORTED_FEATURES.md) against that installed MoonRay; neither is part of
+the default target.
+
 ### Windows: ANARI-SDK
 
 ```powershell

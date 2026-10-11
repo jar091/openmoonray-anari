@@ -44,15 +44,21 @@ add_library(anari_library_moonray SHARED
   material/Material.cpp
   material/Matte.cpp
   material/PhysicallyBased.cpp
+  material/Rdla.cpp
   renderer/Renderer.cpp
   sampler/Image1D.cpp
   sampler/Image2D.cpp
+  sampler/OutputTransform.cpp
   sampler/Sampler.cpp
+  sampler/Transform.cpp
   spatial_field/SpatialField.cpp
   spatial_field/StructuredRegular.cpp
   surface/Surface.cpp
+  texture/MemoryTexture.cpp
+  texture/Pixels.cpp
   texture/ScratchFile.cpp
   texture/ScratchTexture.cpp
+  texture/Texture.cpp
   volume/TransferFunction1D.cpp
   volume/Volume.cpp
   world/Group.cpp
@@ -66,9 +72,9 @@ PRIVATE
   anari::anari
   Moonray::rendering_rndr
   SceneRdl2::scene_rdl2
-  # The image2D sampler and the hdri light write MoonRay's texture files:
-  # MoonRay reads both shading and environment textures from disk, through
-  # OpenImageIO.
+  # The samplers and the hdri light hand MoonRay their pixels through
+  # OpenImageIO, which is what MoonRay reads every texture with: from memory
+  # (texture/MemoryTexture.cpp) or, as a fallback, from scratch files.
   OpenImageIO::OpenImageIO
   # The transferFunction1D volume writes MoonRay's volume files: VdbGeometry
   # reads an OpenVDB file, and there is no in-memory entry point.

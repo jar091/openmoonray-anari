@@ -49,12 +49,16 @@ void Orthographic::syncRdl2(
   // which keeps the vertical extent at `height` even when the frame's aspect
   // differs from the camera's - the same correction the perspective camera
   // makes for its vertical field of view.
+  //
+  // `imageRegion` selects a part of that rectangle (Camera::film()), in the
+  // same world units.
   const float aspect = m_aspect.value_or(imageAspect);
-  const float width = m_height * aspect;
-  const float par = imageAspect > 0.f ? aspect / imageAspect : 1.f;
+  const Film world = film(m_height * aspect, m_height, imageAspect);
 
-  obj.set("film_width_aperture", width);
-  obj.set("pixel_aspect_ratio", par);
+  obj.set("film_width_aperture", world.width);
+  obj.set("pixel_aspect_ratio", world.pixelAspectRatio);
+  obj.set("horizontal_film_offset", world.offsetX);
+  obj.set("vertical_film_offset", world.offsetY);
   obj.set("near", m_near);
   obj.set("far", m_far);
 }

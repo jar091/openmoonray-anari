@@ -48,6 +48,15 @@ inline LONG WINAPI handler(EXCEPTION_POINTERS *info)
   std::printf("\n=== crash: exception 0x%08lx at %p ===\n",
       (unsigned long)code,
       info->ExceptionRecord->ExceptionAddress);
+  if (code == EXCEPTION_ACCESS_VIOLATION
+      && info->ExceptionRecord->NumberParameters >= 2) {
+    // What was read or written: an address near zero is a null pointer plus
+    // the offset of a member.
+    std::printf("    %s address 0x%llx\n",
+        info->ExceptionRecord->ExceptionInformation[0] == 0 ? "reading"
+                                                            : "writing",
+        (unsigned long long)info->ExceptionRecord->ExceptionInformation[1]);
+  }
   std::fflush(stdout); // the process may not survive the walk below
 
   HANDLE process = GetCurrentProcess();

@@ -61,7 +61,8 @@ if mount | grep -qE "on $mount_point \(exfat"; then
     build_src="${TMPDIR:-/tmp}/openmoonray-anari-moonray-src"
     echo "[info] repo is on exFAT - syncing MoonRay sources to $build_src"
     mkdir -p "$build_src"
-    for d in cmake_modules moonray/scene_rdl2 moonray/mcrt_denoise moonray/moonray; do
+    for d in cmake_modules moonray/scene_rdl2 moonray/mcrt_denoise moonray/moonray \
+             moonray/moonshine; do
         mkdir -p "$build_src/$(dirname "$d")"
         rsync -a --delete "$src_root/$d/" "$build_src/$d/"
     done
@@ -184,6 +185,25 @@ cmake -S "$build_src/moonray/moonray" -B "$repo_root/build/moonray" \
     ${cmake_extra[@]+"${cmake_extra[@]}"}
 cmake --build "$repo_root/build/moonray" -j"$jobs"
 cmake --install "$repo_root/build/moonray"
+
+# moonshine is the shader library (the Dwa* materials and the pattern maps) and
+# this repository's dso/ holds the device's own RDL2 DSOs. Both are standalone
+# projects against the MoonRay installed above, like `-Target moonshine` and
+# `-Target anari_dso` of build-moonray-windows.ps1.
+echo "== moonshine =="
+drop_foreign_generator "$repo_root/build/moonshine"
+cmake -S "$build_src/moonray/moonshine" -B "$repo_root/build/moonshine" \
+    "${common_args[@]}" -DMOONSHINE_BUILD_TESTING=NO \
+    ${cmake_extra[@]+"${cmake_extra[@]}"}
+cmake --build "$repo_root/build/moonshine" -j"$jobs"
+cmake --install "$repo_root/build/moonshine"
+
+echo "== anari dso =="
+drop_foreign_generator "$repo_root/build/anari-dso"
+cmake -S "$repo_root/dso" -B "$repo_root/build/anari-dso" \
+    "${common_args[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"}
+cmake --build "$repo_root/build/anari-dso" -j"$jobs"
+cmake --install "$repo_root/build/anari-dso"
 
 echo
 echo "MoonRay installed to $prefix"

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "Image2D.h"
-#include "texture/ScratchTexture.h"
 
+// anari
+#include <anari/frontend/type_utility.h>
 // scene_rdl2
 #include <scene_rdl2/scene/rdl2/SceneObject.h>
 #include <scene_rdl2/scene/rdl2/Types.h>
@@ -15,11 +16,6 @@
 namespace moonray_anari {
 
 Image2D::Image2D(MoonrayDeviceGlobalState *s) : Sampler(s), m_image(this) {}
-
-Image2D::~Image2D()
-{
-  texture::removeScratchTexture(m_texturePath);
-}
 
 void Image2D::commitParameters()
 {
@@ -64,16 +60,19 @@ void Image2D::commitParameters()
     }
   }
 
-  if (hasParam("outTransform") || hasParam("outOffset")) {
-    reportMessage(ANARI_SEVERITY_WARNING,
-        "'outTransform'/'outOffset' are not supported by the image2D sampler "
-        "yet - the image values are used unchanged");
-  }
+  m_output.set(getParam<mat4>("outTransform", mat4(linalg::identity)),
+      getParam<float4>("outOffset", float4(0.f)));
 }
 
 void Image2D::finalize()
 {
   m_valid = false;
+
+  // What the maps hold until they are synced again; see the header.
+  for (int i = 0; i < 3; ++i) {
+    m_previousTextures[i] = std::move(m_textures[i]);
+    m_textures[i] = nullptr;
+  }
 
   if (!m_image) {
     reportMessage(ANARI_SEVERITY_WARNING,
@@ -81,12 +80,28 @@ void Image2D::finalize()
     return;
   }
 
-  if (m_inAttribute != "attribute0") {
+  if (!texture::isImageType(m_image->elementType())) {
     reportMessage(ANARI_SEVERITY_WARNING,
-        "the image2D sampler only reads 'attribute0' (the mesh's texture "
-        "coordinates); '%s' is not available",
-        m_inAttribute.c_str());
+        "the image2D sampler cannot use an image of type %s as a texture",
+        anari::toString(m_image->elementType()));
     return;
+  }
+
+  // attribute0 is the mesh's own st, which the map samples directly (with
+  // texture filtering). The other slots reach the map through an AttributeMap
+  // on its input coordinates.
+  m_inputAttribute = nullptr;
+  if (m_inAttribute != "attribute0") {
+    if (m_inAttribute == "color"
+        || !primitiveAttribute(
+            m_inAttribute, m_inputAttribute, m_inputAttributeType)) {
+      m_inputAttribute = nullptr;
+      reportMessage(ANARI_SEVERITY_WARNING,
+          "the image2D sampler reads 'attribute0' .. 'attribute3'; '%s' is "
+          "not available",
+          m_inAttribute.c_str());
+      return;
+    }
   }
 
   if (m_filter != "linear" && m_filter != "nearest") {
@@ -111,45 +126,33 @@ void Image2D::finalize()
         m_wrapMode1.c_str());
   }
 
-  m_valid = writeTextureFile();
+  m_valid = true;
 }
 
-bool Image2D::writeTextureFile()
+namespace {
+
+texture::ImageSource imageSource(const Array2D &image)
 {
-  // MoonRay samples through OpenImageIO's texture system, which has no
-  // nearest-neighbor mode reachable from ImageMap's parameters: "nearest" is
-  // emulated by writing every texel as a block of pixels, so the filtering
-  // only blurs the outermost pixel of each block (writeScratchTexture()).
-  const uint32_t replicate = m_filter == "nearest"
-      ? texture::nearestReplication(
-          std::max(m_image->size().x, m_image->size().y))
-      : 1u;
+  texture::ImageSource source;
+  source.array = &image;
+  source.version = uint64_t(image.lastDataModified());
+  source.width = image.size().x;
+  source.height = image.size().y;
+  source.type = image.elementType();
+  source.data = image.data();
+  return source;
+}
 
-  std::string error;
-  const std::string path = texture::writeScratchTexture("image2d",
-      this,
-      m_image->size().x,
-      m_image->size().y,
-      m_image->elementType(),
-      m_image->data(),
-      /*channels=*/4,
-      /*mipmapped=*/true,
-      error,
-      replicate,
-      replicate);
+} // namespace
 
-  if (path.empty()) {
-    reportMessage(ANARI_SEVERITY_WARNING,
-        "the image2D sampler could not prepare its texture: %s",
-        error.c_str());
-    return false;
+texture::TexturePtr Image2D::plainTexture(std::string &error) const
+{
+  if (!m_image) {
+    error = "the sampler has no 'image'";
+    return nullptr;
   }
-
-  // The previous file is only removed once the new one is on disk, so a
-  // failed write never leaves the sampler without a texture.
-  texture::removeScratchTexture(m_texturePath);
-  m_texturePath = path;
-  return true;
+  return texture::acquireTexture(
+      "image2d", imageSource(*m_image), texture::TextureLayout(), error);
 }
 
 bool Image2D::isValid() const
@@ -162,14 +165,53 @@ const char *Image2D::rdl2ClassName() const
   return "ImageMap";
 }
 
-void Image2D::syncRdl2(scene_rdl2::rdl2::SceneObject &obj)
+const char *Image2D::inputPrimitiveAttribute() const
 {
-  obj.set("texture", m_texturePath);
+  return m_inputAttribute;
+}
+
+int Image2D::inputPrimitiveAttributeType() const
+{
+  return m_inputAttributeType;
+}
+
+void Image2D::syncRdl2(scene_rdl2::rdl2::SceneObject &obj, SamplerUsage usage)
+{
+  // MoonRay samples through OpenImageIO's texture system, which has no
+  // nearest-neighbor mode reachable from ImageMap's parameters: "nearest" is
+  // emulated by writing every texel as a block of pixels, so the filtering
+  // only blurs the outermost pixel of each block (texture/Pixels.h).
+  const uint32_t replicate = m_filter == "nearest"
+      ? texture::nearestReplication(
+          std::max(m_image->size().x, m_image->size().y))
+      : 1u;
+
+  texture::TextureLayout layout;
+  layout.replicateX = replicate;
+  layout.replicateY = replicate;
+
+  std::string error;
+  texture::TexturePtr texture = writeImageMapOutput(obj,
+      "image2d",
+      imageSource(*m_image),
+      layout,
+      planImageMapOutput(m_output, usage),
+      error);
+  if (!texture) {
+    reportMessage(ANARI_SEVERITY_WARNING,
+        "the image2D sampler could not prepare its texture: %s",
+        error.c_str());
+  }
+  // The previous texture of this usage (kept in m_previousTextures until
+  // here if a commit came in between) is only let go now that the new one
+  // exists - which, for unchanged pixels and transform, is the same one.
+  m_textures[int(usage)] = std::move(texture);
+  m_previousTextures[int(usage)] = nullptr;
+
   // 0 == "texture": sample with the mesh's st coordinates, which is what the
-  // geometry's vertex.attribute0 becomes.
-  obj.set("texture_coordinates", 0);
-  // The scratch file is linear float, so no decoding on top of it.
-  obj.set("gamma", 0);
+  // geometry's vertex.attribute0 becomes. 2 == "input texture coordinates":
+  // the AttributeMap MoonrayScene binds for inputPrimitiveAttribute().
+  obj.set("texture_coordinates", m_inputAttribute ? 2 : 0);
   obj.set("wrap_around", m_wrapMode1 == "repeat");
   obj.set("scale", scene_rdl2::rdl2::Vec2f(m_uvScale[0], m_uvScale[1]));
   obj.set("offset", scene_rdl2::rdl2::Vec2f(m_uvOffset[0], m_uvOffset[1]));

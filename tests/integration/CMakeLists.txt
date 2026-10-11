@@ -174,6 +174,28 @@ foreach(_mode scalar vectorized xpu)
     )
 endforeach()
 
+# --- emitting surfaces sampled by lights (emissionSampling) -----------------
+# A closed room lit by a lamp, as an emitting surface and with MeshLights on
+# it: the same light with far less noise, both sides, a textured emission, an
+# `rdla` material, edits, the bound on the number of lights, ray visibility,
+# a thousand instances in one light, and one scene after the other on one
+# device.
+add_executable(integration_mesh_lights test_mesh_lights.cpp)
+target_link_libraries(integration_mesh_lights PRIVATE anari::anari)
+target_include_directories(integration_mesh_lights
+    PRIVATE "${CMAKE_SOURCE_DIR}/tests/common")
+openmoonray_anari_set_warnings(integration_mesh_lights)
+
+foreach(_mode noise sides reflecting textured rdla spaces updates limit
+        visibility instances churn)
+    add_test(NAME anari.mesh_lights_${_mode}
+        COMMAND integration_mesh_lights ${_mode})
+    set_tests_properties(anari.mesh_lights_${_mode} PROPERTIES
+        LABELS "integration;anari;render"
+        ENVIRONMENT_MODIFICATION "${_loader_env}"
+    )
+endforeach()
+
 # --- sdk.anari_info --------------------------------------------------------
 # Runs the SDK's introspection tool against the moonray device (master prompt
 # Â§31.4). PASS_REGULAR_EXPRESSION requires the device to actually enumerate;

@@ -5,6 +5,7 @@
 
 #include "Light.h"
 #include "array/Array2D.h"
+#include "texture/Texture.h"
 // std
 #include <string>
 
@@ -12,9 +13,10 @@ namespace moonray_anari {
 
 // ANARI 'hdri' light -> MoonRay EnvLight with a lat-long texture.
 //
-// MoonRay's EnvLight reads its map from a *file* (pbr::ImageDistribution opens
-// it with OpenImageIO), so the ANARI radiance array is written to a scratch
-// texture exactly as the image2D sampler's is - see texture/ScratchTexture.h.
+// MoonRay's EnvLight reads its map by name (pbr::ImageDistribution opens it
+// with OpenImageIO), so the ANARI radiance array is registered with
+// OpenImageIO under a name of its own, as the image2D sampler's image is -
+// see texture/Texture.h.
 //
 // The orientation is where the work is. MoonRay maps a direction to the map
 // through a fixed lat-long parameterization in the light's own frame, and that
@@ -28,7 +30,7 @@ namespace moonray_anari {
 struct HDRI : public Light
 {
   HDRI(MoonrayDeviceGlobalState *s);
-  ~HDRI() override;
+  ~HDRI() override = default;
 
   void commitParameters() override;
   void finalize() override;
@@ -45,9 +47,9 @@ struct HDRI : public Light
       const mat4 &instanceXfm) const override;
 
  private:
-  // Writes the current radiance image to a new scratch file and removes the
-  // previous one. Returns false (and reports why) if it could not be written.
-  bool writeTextureFile();
+  // Brings m_texture up to date with the current radiance image. Returns
+  // false (and reports why) if it cannot be used as an environment map.
+  bool updateTexture();
 
   helium::ChangeObserverPtr<Array2D> m_radiance;
   float3 m_up{0.f, 0.f, 1.f};
@@ -56,7 +58,7 @@ struct HDRI : public Light
   // Whether the environment is seen by camera rays (the background).
   bool m_visible{true};
 
-  std::string m_texturePath;
+  texture::TexturePtr m_texture;
   bool m_valid{false};
 };
 
