@@ -1124,6 +1124,9 @@ void MoonrayScene::syncSurfaces(World *world,
     {
       const Surface *surface;
       bool perInstance;
+      // False for an emission no light can have (ReadsView): it counts for
+      // the power of the scene only.
+      bool sampleable;
       std::vector<uint32_t> seenBy;
       int instances;
       size_t triangles;
@@ -1149,7 +1152,7 @@ void MoonrayScene::syncSurfaces(World *world,
         auto known = std::find_if(candidates.begin(),
             candidates.end(),
             [&](const Candidate &c) { return c.surface == surface; });
-        Candidate fresh{surface, false, {}, 0, 0, 0.f};
+        Candidate fresh{surface, false, true, {}, 0, 0, 0.f};
         if (known == candidates.end() && material->fragment()
             && !emitter.mapName.empty()) {
           // The map is an object of the fragment, which the loop over the
@@ -1157,8 +1160,7 @@ void MoonrayScene::syncSurfaces(World *world,
           syncFragment(material, *material->fragment());
           ++loadedEarly;
           const unsigned reads = emissionReads(material, emitter);
-          if ((reads & ReadsView) != 0)
-            continue; // no light has what this emission reads
+          fresh.sampleable = (reads & ReadsView) == 0;
           fresh.perInstance = (reads & ReadsInstance) != 0;
         }
         Candidate &candidate = known != candidates.end() ? *known : fresh;
@@ -1190,9 +1192,19 @@ void MoonrayScene::syncSurfaces(World *world,
         [](const Candidate &a, const Candidate &b) {
           return a.power > b.power;
         });
+    // An emitter with a small share of the power of all of them is not worth
+    // a light: as a surface it adds as little noise as it adds light, as a
+    // light it costs what every light costs.
+    float allPower = 0.f;
+    for (const Candidate &candidate : candidates)
+      allPower += candidate.power;
     int lightsLeft = m_maxMeshLights;
     size_t trianglesLeft = m_maxMeshLightTriangles;
     for (const Candidate &candidate : candidates) {
+      if (!candidate.sampleable
+          || candidate.power < m_minMeshLightPowerShare * allPower) {
+        continue;
+      }
       const int lights = candidate.lights();
       if (lights <= lightsLeft && candidate.triangles <= trianglesLeft) {
         lightsLeft -= lights;
@@ -2284,6 +2296,7 @@ void MoonrayScene::syncScene(World *world,
   m_maxMeshLights = renderer->maxMeshLights() >= 0 ? renderer->maxMeshLights()
                                                    : m_deviceMaxMeshLights;
   m_maxMeshLightTriangles = size_t(renderer->maxMeshLightTriangles());
+  m_minMeshLightPowerShare = renderer->minMeshLightPowerShare();
   syncSurfaces(world, lightSet, geometrySet, layer);
 
   // The lights of the emitting surfaces, which the surfaces brought along.

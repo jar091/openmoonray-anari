@@ -97,6 +97,15 @@
           "description": "how many triangles the meshes of the lights for materials with emissionSampling may have together, both sides and all instances counted; MoonRay rebuilds a mesh light for every edit of it, in about a second per 250000 triangles"
         },
         {
+          "name": "moonray.minMeshLightPowerShare",
+          "types": [
+            "ANARI_FLOAT32"
+          ],
+          "tags": [],
+          "default": 0.02,
+          "description": "an emitter with less than this share of the power (area times radiance) of all emitters with emissionSampling gets no light and emits as a surface; 0 gives every emitter a light"
+        },
+        {
           "name": "maxBounce",
           "types": [
             "ANARI_INT32"

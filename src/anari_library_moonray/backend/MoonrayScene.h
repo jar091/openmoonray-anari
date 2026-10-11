@@ -344,6 +344,7 @@ struct MoonrayScene
   int m_maxMeshLights{64};
   int m_deviceMaxMeshLights{64};
   size_t m_maxMeshLightTriangles{500000};
+  float m_minMeshLightPowerShare{0.02f};
   int m_meshLightsOverLimit{0};
   uint2 m_lastSize{0u, 0u};
 

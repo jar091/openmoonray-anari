@@ -45,6 +45,11 @@ struct Renderer : public Object
   // of a mesh light again for every edit of the light, its material or its
   // object, in about a second per 250 000 triangles.
   int maxMeshLightTriangles() const;
+  // The share of the power of all emitters which ask for lights below which
+  // an emitter gets none (`moonray.minMeshLightPowerShare`): every light
+  // costs a shadow ray at every hit, and a lamp which adds a hundredth of the
+  // light adds a hundredth of the noise as a surface.
+  float minMeshLightPowerShare() const;
 
   // Requested samples per pixel. MoonRay samples a square grid, so the
   // effective count is pixelSamplesSqrt()^2.
@@ -92,6 +97,7 @@ struct Renderer : public Object
   int m_bsdfSamples{1};
   int m_maxMeshLights{-1};
   int m_maxMeshLightTriangles{500000};
+  float m_minMeshLightPowerShare{0.02f};
   int m_pixelSamples{16};
   float3 m_ambientColor{1.f, 1.f, 1.f};
   float m_ambientRadiance{0.f};

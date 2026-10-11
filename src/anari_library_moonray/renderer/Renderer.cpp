@@ -65,6 +65,8 @@ void Renderer::commitParameters()
       : -1;
   m_maxMeshLightTriangles =
       std::max(0, getParam<int>("moonray.maxMeshLightTriangles", 500000));
+  m_minMeshLightPowerShare = std::min(1.f,
+      std::max(0.f, getParam<float>("moonray.minMeshLightPowerShare", 0.02f)));
 
   // --- path depths ---------------------------------------------------------
   // The parameters count bounces the way Cycles does - maxDiffuseBounce = 2
@@ -170,6 +172,11 @@ int Renderer::maxMeshLights() const
 int Renderer::maxMeshLightTriangles() const
 {
   return m_maxMeshLightTriangles;
+}
+
+float Renderer::minMeshLightPowerShare() const
+{
+  return m_minMeshLightPowerShare;
 }
 
 int Renderer::pixelSamples() const

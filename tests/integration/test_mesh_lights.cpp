@@ -932,6 +932,18 @@ void testLimit(ANARIDevice d)
   CHECK_MSG(intProperty(d, "moonray.meshLightsOverLimit") == 2,
       "the lights of the small lamps would have more");
   anariUnsetParameter(d, room.renderer, "moonray.maxMeshLightTriangles");
+  // An emitter with a small share of the power of all of them gets no light:
+  // the small lamps have 73 % of it together, the large one 27 %.
+  const float half = 0.5f;
+  anariSetParameter(d, room.renderer, "moonray.minMeshLightPowerShare",
+      ANARI_FLOAT32, &half);
+  anariCommitParameters(d, room.renderer);
+  room.render();
+  CHECK_MSG(intProperty(d, "moonray.meshLights") == 2,
+      "only the small lamps have half of the power");
+  CHECK_MSG(intProperty(d, "moonray.meshLightsOverLimit") == 0,
+      "the large lamp is not over a limit, it is not worth a light");
+  anariUnsetParameter(d, room.renderer, "moonray.minMeshLightPowerShare");
   anariCommitParameters(d, room.renderer);
 
   setLimit(0);
